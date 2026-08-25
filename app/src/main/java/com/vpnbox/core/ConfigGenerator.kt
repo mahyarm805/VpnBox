@@ -24,10 +24,12 @@ class ConfigGenerator @Inject constructor() {
 
     private fun generateDnsConfig(): JsonObject {
         return JsonObject().apply {
-            addProperty(
-                "servers",
-                "[{\"address\": \"8.8.8.8\", \"detour\": \"direct\"}]"
-            )
+            add("servers", JsonArray().apply {
+                add(JsonObject().apply {
+                    addProperty("address", "8.8.8.8")
+                    addProperty("detour", "direct")
+                })
+            })
         }
     }
 
@@ -53,7 +55,7 @@ class ConfigGenerator @Inject constructor() {
             Protocol.TROJAN -> generateTrojanOutbound(server)
             Protocol.SOCKS4, Protocol.SOCKS5 -> generateSocksOutbound(server)
             Protocol.HTTP -> generateHttpOutbound(server)
-            Protocol.QUIC -> generateQuicOutbound(server)
+            Protocol.HYSTERIA2 -> generateHysteria2Outbound(server)
         }
     }
 
@@ -63,7 +65,7 @@ class ConfigGenerator @Inject constructor() {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("method", server.security ?: "")
+            addProperty("method", server.ssMethod)
             addProperty("password", server.password ?: "")
         }
     }
@@ -74,9 +76,6 @@ class ConfigGenerator @Inject constructor() {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("uuid", server.uuid ?: "")
-            addProperty("security", server.security ?: "")
-            addProperty("alter_id", server.alterId)
             add("vmess_settings", JsonObject().apply {
                 add("vnext", JsonArray().apply {
                     add(JsonObject().apply {
@@ -86,12 +85,27 @@ class ConfigGenerator @Inject constructor() {
                             add(JsonObject().apply {
                                 addProperty("id", server.uuid ?: "")
                                 addProperty("alterId", server.alterId)
-                                addProperty("security", server.security ?: "")
+                                addProperty("security", server.security)
                             })
                         })
                     })
                 })
             })
+            if (server.vmessTls) {
+                add("tls", JsonObject().apply {
+                    addProperty("enabled", true)
+                    addProperty("server_name", server.sni ?: server.address)
+                    if (server.fingerprint != null) {
+                        add("utls", JsonObject().apply {
+                            addProperty("enabled", true)
+                            addProperty("fingerprint", server.fingerprint)
+                        })
+                    }
+                })
+            }
+            if (server.network != "tcp") {
+                add("transport", generateTransport(server))
+            }
         }
     }
 
@@ -101,19 +115,38 @@ class ConfigGenerator @Inject constructor() {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("uuid", server.uuid ?: "")
-            addProperty("flow", server.flow ?: "")
-            add("tls", JsonObject().apply {
-                addProperty("enabled", true)
-                addProperty("server_name", server.sni ?: server.address)
-
-                if (server.fingerprint != null) {
-                    add("utls", JsonObject().apply {
-                        addProperty("enabled", true)
-                        addProperty("fingerprint", server.fingerprint ?: "")
+            add("vless_settings", JsonObject().apply {
+                add("users", JsonArray().apply {
+                    add(JsonObject().apply {
+                        addProperty("id", server.uuid ?: "")
+                        addProperty("flow", server.flow ?: "")
+                        addProperty("encryption", server.vlessEncryption)
                     })
-                }
+                })
             })
+            if (server.vlessTls) {
+                add("tls", JsonObject().apply {
+                    addProperty("enabled", true)
+                    addProperty("server_name", server.sni ?: server.address)
+                    if (server.fingerprint != null) {
+                        add("utls", JsonObject().apply {
+                            addProperty("enabled", true)
+                            addProperty("fingerprint", server.fingerprint)
+                        })
+                    }
+                    if (server.realityEnabled) {
+                        add("reality", JsonObject().apply {
+                            addProperty("enabled", true)
+                            addProperty("public_key", server.realityPublicKey ?: "")
+                            addProperty("short_id", server.realityShortId ?: "")
+                            addProperty("spider_x", server.realitySpiderX ?: "")
+                        })
+                    }
+                })
+            }
+            if (server.network != "tcp") {
+                add("transport", generateTransport(server))
+            }
         }
     }
 
@@ -123,11 +156,25 @@ class ConfigGenerator @Inject constructor() {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("password", server.password ?: "")
-            add("tls", JsonObject().apply {
-                addProperty("enabled", true)
-                addProperty("server_name", server.sni ?: server.address)
+            add("trojan_settings", JsonObject().apply {
+                add("users", JsonArray().apply {
+                    add(JsonObject().apply {
+                        addProperty("password", server.password ?: "")
+                    })
+                })
             })
+            if (server.trojanTls) {
+                add("tls", JsonObject().apply {
+                    addProperty("enabled", true)
+                    addProperty("server_name", server.sni ?: server.address)
+                    if (server.fingerprint != null) {
+                        add("utls", JsonObject().apply {
+                            addProperty("enabled", true)
+                            addProperty("fingerprint", server.fingerprint)
+                        })
+                    }
+                })
+            }
         }
     }
 
@@ -137,10 +184,15 @@ class ConfigGenerator @Inject constructor() {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-
-            if (server.password != null) {
-                addProperty("username", server.uuid ?: "")
-                addProperty("password", server.password ?: "")
+            if (server.username != null || server.password != null) {
+                add("socks_settings", JsonObject().apply {
+                    add("users", JsonArray().apply {
+                        add(JsonObject().apply {
+                            addProperty("username", server.username ?: "")
+                            addProperty("password", server.password ?: "")
+                        })
+                    })
+                })
             }
         }
     }
@@ -151,15 +203,20 @@ class ConfigGenerator @Inject constructor() {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-
-            if (server.password != null) {
-                addProperty("username", server.uuid ?: "")
-                addProperty("password", server.password ?: "")
+            if (server.username != null || server.password != null) {
+                add("http_settings", JsonObject().apply {
+                    add("users", JsonArray().apply {
+                        add(JsonObject().apply {
+                            addProperty("username", server.username ?: "")
+                            addProperty("password", server.password ?: "")
+                        })
+                    })
+                })
             }
         }
     }
 
-    private fun generateQuicOutbound(server: ServerConfig): JsonObject {
+    private fun generateHysteria2Outbound(server: ServerConfig): JsonObject {
         return JsonObject().apply {
             addProperty("type", "hysteria2")
             addProperty("tag", "proxy")
@@ -170,20 +227,40 @@ class ConfigGenerator @Inject constructor() {
                 addProperty("enabled", true)
                 addProperty("server_name", server.sni ?: server.address)
             })
+            if (server.obfs != null) {
+                add("obfs", JsonObject().apply {
+                    addProperty("type", server.obfs)
+                    addProperty("password", server.obfsPassword ?: "")
+                })
+            }
+        }
+    }
+
+    private fun generateTransport(server: ServerConfig): JsonObject {
+        return JsonObject().apply {
+            addProperty("type", server.network)
+            when (server.network) {
+                "ws" -> {
+                    add("websocket", JsonObject().apply {
+                        addProperty("path", "/")
+                    })
+                }
+                "grpc" -> {
+                    add("grpc", JsonObject().apply {
+                        addProperty("service_name", "")
+                    })
+                }
+            }
         }
     }
 
     fun generateChainConfig(servers: List<ServerConfig>): String {
         val outbounds = JsonArray()
-
         servers.forEachIndexed { index, server ->
-            val tag = if (index == servers.lastIndex) {
-                "proxy"
-            } else {
-                "chain-$index"
-            }
-
-            outbounds.add(generateOutboundForChain(server, tag))
+            val tag = if (index == servers.lastIndex) "proxy" else "chain-$index"
+            val outbound = generateOutbound(server)
+            outbound.addProperty("tag", tag)
+            outbounds.add(outbound)
         }
 
         val config = JsonObject().apply {
@@ -192,16 +269,6 @@ class ConfigGenerator @Inject constructor() {
             add("inbounds", generateInbounds())
             add("outbounds", outbounds)
         }
-
         return config.toString()
-    }
-
-    private fun generateOutboundForChain(
-        server: ServerConfig,
-        tag: String
-    ): JsonObject {
-        val outbound = generateOutbound(server)
-        outbound.addProperty("tag", tag)
-        return outbound
     }
 }

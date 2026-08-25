@@ -3,6 +3,9 @@ package com.vpnbox.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.vpnbox.data.model.ServerConfig
+import com.vpnbox.data.repository.ServerRepository
+import com.vpnbox.util.UriParser
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,7 +15,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    application: Application
+    application: Application,
+    private val repository: ServerRepository
 ) : AndroidViewModel(application) {
 
     private val _isDarkMode = MutableStateFlow(true)
@@ -29,7 +33,12 @@ class SettingsViewModel @Inject constructor(
         _autoConnect.value = !_autoConnect.value
     }
 
-    fun importFromUri() {
-        // TODO: Implement URI import
+    fun importFromUri(uri: String) {
+        viewModelScope.launch {
+            val server = UriParser.parse(uri)
+            if (server != null) {
+                repository.insertServer(server)
+            }
+        }
     }
 }

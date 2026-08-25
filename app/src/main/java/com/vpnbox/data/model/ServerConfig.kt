@@ -11,7 +11,7 @@ enum class Protocol(val displayName: String, val defaultPort: Int) {
     SOCKS4("SOCKS4", 1080),
     SOCKS5("SOCKS5", 1080),
     HTTP("HTTP", 8080),
-    QUIC("QUIC", 443)
+    HYSTERIA2("Hysteria2", 443)
 }
 
 @Entity(tableName = "servers")
@@ -22,15 +22,34 @@ data class ServerConfig(
     val protocol: Protocol,
     val address: String,
     val port: Int,
+    // Common
     val password: String? = null,
+    val sni: String? = null,
+    val fingerprint: String? = null,
+    val country: String? = null,
+    val isSelected: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    // VMess
     val uuid: String? = null,
     val alterId: Int = 0,
     val security: String = "auto",
     val network: String = "tcp",
-    val sni: String? = null,
-    val fingerprint: String? = null,
+    val vmessTls: Boolean = false,
+    // VLESS
     val flow: String? = null,
-    val country: String? = null,
-    val isSelected: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val vlessEncryption: String = "none",
+    val vlessTls: Boolean = true,
+    val realityEnabled: Boolean = false,
+    val realityPublicKey: String? = null,
+    val realityShortId: String? = null,
+    val realitySpiderX: String? = null,
+    // Trojan
+    val trojanTls: Boolean = true,
+    // Shadowsocks
+    val ssMethod: String = "aes-256-gcm",
+    // SOCKS/HTTP
+    val username: String? = null,
+    // Hysteria2
+    val obfs: String? = null,
+    val obfsPassword: String? = null
 )

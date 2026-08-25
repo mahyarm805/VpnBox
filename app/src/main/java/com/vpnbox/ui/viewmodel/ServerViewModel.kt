@@ -2,7 +2,6 @@ package com.vpnbox.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vpnbox.data.model.Protocol
 import com.vpnbox.data.model.ServerConfig
 import com.vpnbox.data.repository.ServerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,15 +43,15 @@ class ServerViewModel @Inject constructor(
         }
     }
 
-    fun addServer(name: String, address: String, port: Int, protocol: String) {
+    fun addServer(server: ServerConfig) {
         viewModelScope.launch {
-            val server = ServerConfig(
-                name = name,
-                protocol = Protocol.valueOf(protocol),
-                address = address,
-                port = port
-            )
             repository.insertServer(server)
+        }
+    }
+
+    fun updateServer(server: ServerConfig) {
+        viewModelScope.launch {
+            repository.updateServer(server)
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.vpnbox.ui.viewmodel
 
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vpnbox.core.ConfigGenerator
@@ -41,17 +42,11 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun toggleConnection() {
-        when (_connectionState.value) {
-            ConnectionState.DISCONNECTED -> connect()
-            ConnectionState.CONNECTED -> disconnect()
-            ConnectionState.CONNECTING -> {}
-            ConnectionState.DISCONNECTING -> {}
-            ConnectionState.ERROR -> connect()
-        }
+    fun onVpnPermissionGranted() {
+        connectVpn()
     }
 
-    private fun connect() {
+    fun connectVpn() {
         val server = _currentServer.value ?: return
         viewModelScope.launch {
             _connectionState.value = ConnectionState.CONNECTING
@@ -76,7 +71,7 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun disconnect() {
+    fun disconnectVpn() {
         viewModelScope.launch {
             _connectionState.value = ConnectionState.DISCONNECTING
             try {

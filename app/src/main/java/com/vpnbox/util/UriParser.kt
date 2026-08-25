@@ -35,23 +35,39 @@ object UriParser {
             alterId = json.get("aid")?.asInt ?: 0,
             security = json.get("scy")?.asString ?: "auto",
             network = json.get("net")?.asString ?: "tcp",
-            sni = json.get("sni")?.asString
+            sni = json.get("sni")?.asString,
+            fingerprint = json.get("fp")?.asString,
+            vmessTls = json.get("tls")?.asString == "tls"
         )
     }
 
     private fun parseShadowsocks(uri: String): ServerConfig {
-        val decoded = String(android.util.Base64.decode(uri.removePrefix("ss://"), android.util.Base64.DEFAULT))
+        val data = uri.removePrefix("ss://")
+        val decoded = try {
+            String(android.util.Base64.decode(data, android.util.Base64.DEFAULT))
+        } catch (e: Exception) {
+            data
+        }
+
         val parts = decoded.split("@")
+        if (parts.size < 2) return ServerConfig(
+            name = "SS Server",
+            protocol = Protocol.SHADOWSOCKS,
+            address = "",
+            port = 8388
+        )
+
         val userInfo = parts[0].split(":")
-        val serverInfo = parts[1].split("#")
+        val serverPart = parts[1].split("#")
+        val addressPort = serverPart[0].split(":")
 
         return ServerConfig(
-            name = URLDecoder.decode(serverInfo.getOrElse(1) { "SS Server" }, "UTF-8"),
+            name = if (serverPart.size > 1) URLDecoder.decode(serverPart[1], "UTF-8") else "SS Server",
             protocol = Protocol.SHADOWSOCKS,
-            address = serverInfo[0].split(":")[0],
-            port = serverInfo[0].split(":")[1].toIntOrNull() ?: 8388,
+            address = addressPort[0],
+            port = addressPort.getOrElse(1) { "8388" }.toIntOrNull() ?: 8388,
             password = userInfo.getOrElse(1) { "" },
-            security = userInfo[0]
+            ssMethod = userInfo[0]
         )
     }
 
@@ -61,16 +77,28 @@ object UriParser {
         val address = uriObj.host ?: ""
         val port = uriObj.port.takeIf { it > 0 } ?: 443
 
+        val sni = uriObj.getQueryParameter("sni")
+        val fp = uriObj.getQueryParameter("fp")
+        val flow = uriObj.getQueryParameter("flow")
+        val security = uriObj.getQueryParameter("security") ?: "tls"
+        val pbk = uriObj.getQueryParameter("pbk")
+        val sid = uriObj.getQueryParameter("sid")
+        val spx = uriObj.getQueryParameter("spx")
+
         return ServerConfig(
-            name = uriObj.getQueryParameter("security")?.let { "VLESS - $it" } ?: "VLESS Server",
+            name = sni?.let { "VLESS - $it" } ?: "VLESS Server",
             protocol = Protocol.VLESS,
             address = address,
             port = port,
             uuid = userInfo.getOrElse(0) { "" },
-            sni = uriObj.getQueryParameter("sni"),
-            fingerprint = uriObj.getQueryParameter("fp"),
-            flow = uriObj.getQueryParameter("flow"),
-            security = uriObj.getQueryParameter("security") ?: "tls"
+            sni = sni,
+            fingerprint = fp,
+            flow = flow,
+            vlessTls = security == "tls" || security == "reality",
+            realityEnabled = security == "reality",
+            realityPublicKey = pbk,
+            realityShortId = sid,
+            realitySpiderX = spx
         )
     }
 
@@ -80,14 +108,18 @@ object UriParser {
         val address = uriObj.host ?: ""
         val port = uriObj.port.takeIf { it > 0 } ?: 443
 
+        val sni = uriObj.getQueryParameter("sni")
+        val fp = uriObj.getQueryParameter("fp")
+
         return ServerConfig(
-            name = uriObj.getQueryParameter("security")?.let { "Trojan - $it" } ?: "Trojan Server",
+            name = sni?.let { "Trojan - $it" } ?: "Trojan Server",
             protocol = Protocol.TROJAN,
             address = address,
             port = port,
             password = password,
-            sni = uriObj.getQueryParameter("sni"),
-            security = uriObj.getQueryParameter("security") ?: "tls"
+            sni = sni,
+            fingerprint = fp,
+            trojanTls = true
         )
     }
 }
