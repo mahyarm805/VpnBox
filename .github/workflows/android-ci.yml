@@ -25,17 +25,11 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Set Gradle Properties
-        run: |
-          echo "org.gradle.jvmargs=-Xmx4g" >> gradle.properties
-          echo "android.useAndroidX=true" >> gradle.properties
-          echo "android.enableJetifier=true" >> gradle.properties
-
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug --no-daemon
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease
+        run: gradle assembleRelease --no-daemon
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
