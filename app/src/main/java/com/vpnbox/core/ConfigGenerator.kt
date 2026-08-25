@@ -1,3 +1,5 @@
+package com.vpnbox.core
+
 import com.vpnbox.data.model.Protocol
 import com.vpnbox.data.model.ServerConfig
 import com.google.gson.JsonObject
