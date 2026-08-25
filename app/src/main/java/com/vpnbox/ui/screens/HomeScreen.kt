@@ -25,6 +25,7 @@ import com.vpnbox.ui.viewmodel.HomeViewModel
 fun HomeScreen(
     onNavigateToServers: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToDebug: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
@@ -137,6 +138,9 @@ fun HomeScreen(
                     Icon(Icons.Default.Link, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Servers")
+                }
+                OutlinedButton(onClick = onNavigateToDebug) {
+                    Text("Debug")
                 }
             }
         }

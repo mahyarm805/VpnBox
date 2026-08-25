@@ -51,5 +51,15 @@ data class ServerConfig(
     val username: String? = null,
     // Hysteria2
     val obfs: String? = null,
-    val obfsPassword: String? = null
+    val obfsPassword: String? = null,
+    // Transport
+    val wsHost: String? = null,
+    val wsPath: String? = null,
+    val grpcServiceName: String? = null,
+    val h2Host: String? = null,
+    val h2Path: String? = null,
+    val xhttpMode: String? = null,
+    val xhttpPath: String? = null,
+    val alpn: String? = null,
+    val allowInsecure: Boolean = false
 )

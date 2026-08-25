@@ -9,12 +9,14 @@ import com.vpnbox.ui.screens.HomeScreen
 import com.vpnbox.ui.screens.LoginScreen
 import com.vpnbox.ui.screens.ServerListScreen
 import com.vpnbox.ui.screens.SettingsScreen
+import com.vpnbox.ui.screens.DebugScreen
 
 sealed class Screen(val route: String) {
     object Login : Screen("login")
     object Home : Screen("home")
     object ServerList : Screen("servers")
     object Settings : Screen("settings")
+    object Debug : Screen("debug")
 }
 
 @Composable
@@ -42,7 +44,15 @@ fun AppNavigation(
                 },
                 onNavigateToSettings = {
                     navController.navigate(Screen.Settings.route)
+                },
+                onNavigateToDebug = {
+                    navController.navigate(Screen.Debug.route)
                 }
+            )
+        }
+        composable(Screen.Debug.route) {
+            DebugScreen(
+                onBack = { navController.popBackStack() }
             )
         }
 
