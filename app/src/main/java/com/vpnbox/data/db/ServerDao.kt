@@ -15,6 +15,9 @@ interface ServerDao {
     @Query("SELECT * FROM servers WHERE isSelected = 1 LIMIT 1")
     suspend fun getSelectedServer(): ServerConfig?
 
+    @Query("SELECT * FROM servers WHERE isSelected = 1 LIMIT 1")
+    fun observeSelectedServer(): Flow<ServerConfig?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertServer(server: ServerConfig): Long
 

@@ -20,6 +20,8 @@ class ServerRepository @Inject constructor(
 
     suspend fun getSelectedServer(): ServerConfig? = serverDao.getSelectedServer()
 
+    fun observeSelectedServer(): Flow<ServerConfig?> = serverDao.observeSelectedServer()
+
     suspend fun insertServer(server: ServerConfig): Long = serverDao.insertServer(server)
 
     suspend fun updateServer(server: ServerConfig) = serverDao.updateServer(server)

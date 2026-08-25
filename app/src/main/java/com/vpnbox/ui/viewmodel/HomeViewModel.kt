@@ -3,9 +3,9 @@ package com.vpnbox.ui.viewmodel
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vpnbox.core.ConfigGenerator
 import com.vpnbox.core.VpnTunnelService
 import com.vpnbox.data.model.ConnectionState
 import com.vpnbox.data.model.ServerConfig
@@ -15,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -22,6 +23,10 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val repository: ServerRepository
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "HomeViewModel"
+    }
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -33,34 +38,26 @@ class HomeViewModel @Inject constructor(
     val connectionTime: StateFlow<String> = _connectionTime.asStateFlow()
 
     private var connectionStartTime: Long = 0
-    private var pendingConnect: Boolean = false
 
     init {
-        loadCurrentServer()
-    }
-
-    private fun loadCurrentServer() {
+        // Reactively observe the selected server from database
         viewModelScope.launch {
-            _currentServer.value = repository.getSelectedServer()
+            repository.observeSelectedServer().collectLatest { server ->
+                Log.d(TAG, "Selected server changed: ${server?.name} (${server?.protocol})")
+                _currentServer.value = server
+            }
         }
     }
 
-    fun checkVpnPermission(context: Context): Intent? {
-        return VpnService.prepare(context)
-    }
-
-    fun onVpnPermissionGranted(context: Context) {
-        pendingConnect = true
-        startVpnService(context)
-    }
-
-    private fun startVpnService(context: Context) {
+    fun connectVpn(context: Context) {
         val server = _currentServer.value
         if (server == null) {
+            Log.w(TAG, "No server selected, cannot connect")
             _connectionState.value = ConnectionState.ERROR
             return
         }
 
+        Log.d(TAG, "Starting VPN connection to: ${server.name} (${server.protocol.displayName})")
         _connectionState.value = ConnectionState.CONNECTING
 
         val intent = Intent(context, VpnTunnelService::class.java).apply {
@@ -71,45 +68,36 @@ class HomeViewModel @Inject constructor(
 
         try {
             context.startForegroundService(intent)
-        } catch (e: Exception) {
-            _connectionState.value = ConnectionState.ERROR
-            return
-        }
+            Log.d(TAG, "VPN service start command sent")
 
-        // Poll for service readiness
-        viewModelScope.launch {
-            var attempts = 0
-            while (attempts < 20) {
-                delay(500)
-                val service = VpnTunnelService.getInstance()
-                if (service != null && service.isRunning()) {
-                    _connectionState.value = ConnectionState.CONNECTED
-                    connectionStartTime = System.currentTimeMillis()
-                    startTimer()
-                    pendingConnect = false
-                    return@launch
+            // Poll for service readiness
+            viewModelScope.launch {
+                var attempts = 0
+                while (attempts < 30) {
+                    delay(500)
+                    val service = VpnTunnelService.getInstance()
+                    if (service != null && service.isRunning()) {
+                        Log.d(TAG, "VPN connected successfully")
+                        _connectionState.value = ConnectionState.CONNECTED
+                        connectionStartTime = System.currentTimeMillis()
+                        startTimer()
+                        return@launch
+                    }
+                    attempts++
+                    Log.d(TAG, "Waiting for VPN service... attempt $attempts")
                 }
-                attempts++
+                Log.e(TAG, "VPN service timeout after 15s")
+                _connectionState.value = ConnectionState.ERROR
             }
-            // Timeout
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start VPN service", e)
             _connectionState.value = ConnectionState.ERROR
-            pendingConnect = false
-        }
-    }
-
-    fun connectVpn(context: Context) {
-        val intent = checkVpnPermission(context)
-        if (intent != null) {
-            // Permission needed - caller should launch intent
-            _connectionState.value = ConnectionState.CONNECTING
-        } else {
-            // Permission already granted
-            startVpnService(context)
         }
     }
 
     fun disconnectVpn(context: Context) {
         viewModelScope.launch {
+            Log.d(TAG, "Disconnecting VPN")
             _connectionState.value = ConnectionState.DISCONNECTING
             try {
                 val intent = Intent(context, VpnTunnelService::class.java).apply {
@@ -118,7 +106,9 @@ class HomeViewModel @Inject constructor(
                 context.startService(intent)
                 _connectionState.value = ConnectionState.DISCONNECTED
                 _connectionTime.value = "00:00:00"
+                Log.d(TAG, "VPN disconnected")
             } catch (e: Exception) {
+                Log.e(TAG, "Failed to disconnect", e)
                 _connectionState.value = ConnectionState.ERROR
             }
         }

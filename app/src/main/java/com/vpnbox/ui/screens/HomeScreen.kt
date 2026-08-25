@@ -36,7 +36,7 @@ fun HomeScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.onVpnPermissionGranted(context)
+            viewModel.connectVpn(context)
         }
     }
 
@@ -67,7 +67,7 @@ fun HomeScreen(
                     ConnectionState.CONNECTING -> "Connecting..."
                     ConnectionState.DISCONNECTED -> "Disconnected"
                     ConnectionState.DISCONNECTING -> "Disconnecting..."
-                    ConnectionState.ERROR -> "Error"
+                    ConnectionState.ERROR -> "No server selected"
                 },
                 style = MaterialTheme.typography.headlineMedium,
                 color = when (connectionState) {
@@ -83,7 +83,7 @@ fun HomeScreen(
 
             // Current Server
             Text(
-                text = currentServer?.name ?: "No server selected",
+                text = currentServer?.let { "${it.protocol.displayName} - ${it.name}" } ?: "No server selected",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -96,10 +96,13 @@ fun HomeScreen(
                 onClick = {
                     when (connectionState) {
                         ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
+                            // Check if VPN permission is needed
                             val prepareIntent = VpnService.prepare(context)
                             if (prepareIntent != null) {
+                                // Permission needed - launch system dialog
                                 vpnPermissionLauncher.launch(prepareIntent)
                             } else {
+                                // Permission already granted - connect directly
                                 viewModel.connectVpn(context)
                             }
                         }
