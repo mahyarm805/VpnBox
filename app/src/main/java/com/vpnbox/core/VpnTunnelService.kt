@@ -1,6 +1,5 @@
 package com.vpnbox.core
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -14,27 +13,37 @@ import androidx.core.app.NotificationCompat
 import com.vpnbox.MainActivity
 import com.vpnbox.R
 import com.vpnbox.data.model.ServerConfig
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
-import javax.inject.Inject
-import javax.inject.Singleton
+import java.io.File
+import java.io.FileOutputStream
 
-@Singleton
-class VpnTunnelService @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
+class VpnTunnelService : VpnService() {
+
     companion object {
         private const val TAG = "VpnTunnelService"
         private const val CHANNEL_ID = "vpn_channel"
         private const val NOTIFICATION_ID = 1
+
+        private var instance: VpnTunnelService? = null
+
+        fun getInstance(): VpnTunnelService? = instance
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
-    private var singBoxService: SingBoxService? = null
+    private var singBoxProcess: Process? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    init {
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
         createNotificationChannel()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        instance = null
+        stopVpn()
+        serviceScope.cancel()
     }
 
     private fun createNotificationChannel() {
@@ -46,7 +55,7 @@ class VpnTunnelService @Inject constructor(
             ).apply {
                 description = "Shows VPN connection status"
             }
-            val manager = context.getSystemService(NotificationManager::class.java)
+            val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
     }
@@ -54,11 +63,19 @@ class VpnTunnelService @Inject constructor(
     fun startVpn(server: ServerConfig, configGenerator: ConfigGenerator): Boolean {
         return try {
             val config = configGenerator.generateConfig(server)
-            singBoxService = SingBoxService(context)
 
-            serviceScope.launch {
-                singBoxService?.start(config)
+            val configFile = File(filesDir, "sing-box-config.json")
+            FileOutputStream(configFile).use { fos ->
+                fos.write(config.toByteArray())
             }
+
+            val processBuilder = ProcessBuilder(
+                "sing-box", "run", "-c", configFile.absolutePath
+            )
+            processBuilder.redirectErrorStream(true)
+            processBuilder.directory(filesDir)
+
+            singBoxProcess = processBuilder.start()
 
             showNotification("Connected to ${server.name}")
             Log.d(TAG, "VPN started for server: ${server.name}")
@@ -70,23 +87,26 @@ class VpnTunnelService @Inject constructor(
     }
 
     fun stopVpn() {
-        serviceScope.launch {
-            singBoxService?.stop()
+        try {
+            singBoxProcess?.destroy()
+            singBoxProcess = null
+            vpnInterface?.close()
+            vpnInterface = null
+            hideNotification()
+            Log.d(TAG, "VPN stopped")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop VPN", e)
         }
-        vpnInterface?.close()
-        vpnInterface = null
-        hideNotification()
-        Log.d(TAG, "VPN stopped")
     }
 
     private fun showNotification(text: String) {
-        val intent = Intent(context, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
-            context, 0, intent,
+            this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("VpnBox")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -94,19 +114,19 @@ class VpnTunnelService @Inject constructor(
             .setOngoing(true)
             .build()
 
-        val manager = context.getSystemService(NotificationManager::class.java)
+        val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun hideNotification() {
-        val manager = context.getSystemService(NotificationManager::class.java)
+        val manager = getSystemService(NotificationManager::class.java)
         manager.cancel(NOTIFICATION_ID)
     }
 
-    fun isRunning(): Boolean = singBoxService?.isRunning() ?: false
+    fun isRunning(): Boolean = singBoxProcess?.isAlive ?: false
 
-    fun destroy() {
+    override fun onRevoke() {
         stopVpn()
-        serviceScope.cancel()
+        super.onRevoke()
     }
 }

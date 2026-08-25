@@ -17,9 +17,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val repository: ServerRepository,
-    private val vpnService: VpnTunnelService,
-    private val configGenerator: ConfigGenerator
+    private val repository: ServerRepository
 ) : ViewModel() {
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -58,11 +56,17 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _connectionState.value = ConnectionState.CONNECTING
             try {
-                val success = vpnService.startVpn(server, configGenerator)
-                if (success) {
-                    _connectionState.value = ConnectionState.CONNECTED
-                    connectionStartTime = System.currentTimeMillis()
-                    startTimer()
+                val service = VpnTunnelService.getInstance()
+                if (service != null) {
+                    val configGenerator = ConfigGenerator()
+                    val success = service.startVpn(server, configGenerator)
+                    if (success) {
+                        _connectionState.value = ConnectionState.CONNECTED
+                        connectionStartTime = System.currentTimeMillis()
+                        startTimer()
+                    } else {
+                        _connectionState.value = ConnectionState.ERROR
+                    }
                 } else {
                     _connectionState.value = ConnectionState.ERROR
                 }
@@ -76,7 +80,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _connectionState.value = ConnectionState.DISCONNECTING
             try {
-                vpnService.stopVpn()
+                VpnTunnelService.getInstance()?.stopVpn()
                 _connectionState.value = ConnectionState.DISCONNECTED
                 _connectionTime.value = "00:00:00"
             } catch (e: Exception) {
