@@ -1,12 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.WhiteHole" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Primary colors - Blue/White -->
-        <item name="colorPrimary">@color/blue_primary</item>
-        <item name="colorPrimaryDark">@color/blue_primary_dark</item>
-        <item name="colorAccent">@color/blue_accent</item>
-
-        <!-- Background -->
+    <style name="Theme.WhiteHole" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/dark_background</item>
         <item name="android:statusBarColor">@color/dark_background</item>
         <item name="android:navigationBarColor">@color/dark_background</item>
