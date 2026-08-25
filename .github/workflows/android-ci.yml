@@ -27,9 +27,7 @@ jobs:
 
       - name: Set Gradle Properties
         run: |
-          echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
-          echo "android.useAndroidX=true" >> gradle.properties
-          echo "android.enableJetifier=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx4g" >> gradle.properties
 
       - name: Build Debug APK
         run: gradle assembleDebug
