@@ -36,7 +36,7 @@ fun HomeScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.onVpnPermissionGranted()
+            viewModel.onVpnPermissionGranted(context)
         }
     }
 
@@ -73,7 +73,7 @@ fun HomeScreen(
                 color = when (connectionState) {
                     ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
                     ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
-                    ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.error
+                    ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
                     ConnectionState.DISCONNECTING -> MaterialTheme.colorScheme.tertiary
                     ConnectionState.ERROR -> MaterialTheme.colorScheme.error
                 }
@@ -94,15 +94,19 @@ fun HomeScreen(
             ConnectionButton(
                 connectionState = connectionState,
                 onClick = {
-                    if (connectionState == ConnectionState.DISCONNECTED || connectionState == ConnectionState.ERROR) {
-                        val prepareIntent = VpnService.prepare(context)
-                        if (prepareIntent != null) {
-                            vpnPermissionLauncher.launch(prepareIntent)
-                        } else {
-                            viewModel.connectVpn()
+                    when (connectionState) {
+                        ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
+                            val prepareIntent = VpnService.prepare(context)
+                            if (prepareIntent != null) {
+                                vpnPermissionLauncher.launch(prepareIntent)
+                            } else {
+                                viewModel.connectVpn(context)
+                            }
                         }
-                    } else if (connectionState == ConnectionState.CONNECTED) {
-                        viewModel.disconnectVpn()
+                        ConnectionState.CONNECTED -> {
+                            viewModel.disconnectVpn(context)
+                        }
+                        else -> { /* Ignore clicks during transitions */ }
                     }
                 }
             )

@@ -37,15 +37,6 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideServerRepository(
-        serverDao: ServerDao,
-        proxyChainDao: ProxyChainDao
-    ): ServerRepository {
-        return ServerRepository(serverDao, proxyChainDao)
-    }
-
-    @Provides
-    @Singleton
     fun provideApiClient(): ApiClient {
         return ApiClient()
     }

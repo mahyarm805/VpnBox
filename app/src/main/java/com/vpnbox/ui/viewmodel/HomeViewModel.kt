@@ -1,6 +1,8 @@
 package com.vpnbox.ui.viewmodel
 
+import android.content.Context
 import android.content.Intent
+import android.net.VpnService
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vpnbox.core.ConfigGenerator
@@ -31,6 +33,7 @@ class HomeViewModel @Inject constructor(
     val connectionTime: StateFlow<String> = _connectionTime.asStateFlow()
 
     private var connectionStartTime: Long = 0
+    private var pendingConnect: Boolean = false
 
     init {
         loadCurrentServer()
@@ -42,40 +45,77 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun onVpnPermissionGranted() {
-        connectVpn()
+    fun checkVpnPermission(context: Context): Intent? {
+        return VpnService.prepare(context)
     }
 
-    fun connectVpn() {
-        val server = _currentServer.value ?: return
+    fun onVpnPermissionGranted(context: Context) {
+        pendingConnect = true
+        startVpnService(context)
+    }
+
+    private fun startVpnService(context: Context) {
+        val server = _currentServer.value
+        if (server == null) {
+            _connectionState.value = ConnectionState.ERROR
+            return
+        }
+
+        _connectionState.value = ConnectionState.CONNECTING
+
+        val intent = Intent(context, VpnTunnelService::class.java).apply {
+            action = VpnTunnelService.ACTION_CONNECT
+            putExtra("server_name", server.name)
+            putExtra("server_id", server.id)
+        }
+
+        try {
+            context.startForegroundService(intent)
+        } catch (e: Exception) {
+            _connectionState.value = ConnectionState.ERROR
+            return
+        }
+
+        // Poll for service readiness
         viewModelScope.launch {
-            _connectionState.value = ConnectionState.CONNECTING
-            try {
+            var attempts = 0
+            while (attempts < 20) {
+                delay(500)
                 val service = VpnTunnelService.getInstance()
-                if (service != null) {
-                    val configGenerator = ConfigGenerator()
-                    val success = service.startVpn(server, configGenerator)
-                    if (success) {
-                        _connectionState.value = ConnectionState.CONNECTED
-                        connectionStartTime = System.currentTimeMillis()
-                        startTimer()
-                    } else {
-                        _connectionState.value = ConnectionState.ERROR
-                    }
-                } else {
-                    _connectionState.value = ConnectionState.ERROR
+                if (service != null && service.isRunning()) {
+                    _connectionState.value = ConnectionState.CONNECTED
+                    connectionStartTime = System.currentTimeMillis()
+                    startTimer()
+                    pendingConnect = false
+                    return@launch
                 }
-            } catch (e: Exception) {
-                _connectionState.value = ConnectionState.ERROR
+                attempts++
             }
+            // Timeout
+            _connectionState.value = ConnectionState.ERROR
+            pendingConnect = false
         }
     }
 
-    fun disconnectVpn() {
+    fun connectVpn(context: Context) {
+        val intent = checkVpnPermission(context)
+        if (intent != null) {
+            // Permission needed - caller should launch intent
+            _connectionState.value = ConnectionState.CONNECTING
+        } else {
+            // Permission already granted
+            startVpnService(context)
+        }
+    }
+
+    fun disconnectVpn(context: Context) {
         viewModelScope.launch {
             _connectionState.value = ConnectionState.DISCONNECTING
             try {
-                VpnTunnelService.getInstance()?.stopVpn()
+                val intent = Intent(context, VpnTunnelService::class.java).apply {
+                    action = VpnTunnelService.ACTION_DISCONNECT
+                }
+                context.startService(intent)
                 _connectionState.value = ConnectionState.DISCONNECTED
                 _connectionTime.value = "00:00:00"
             } catch (e: Exception) {
