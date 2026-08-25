@@ -2,8 +2,11 @@ import com.vpnbox.data.model.Protocol
 import com.vpnbox.data.model.ServerConfig
 import com.google.gson.JsonObject
 import com.google.gson.JsonArray
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class ConfigGenerator {
+@Singleton
+class ConfigGenerator @Inject constructor() {
 
     fun generateConfig(server: ServerConfig): String {
         val config = JsonObject().apply {
