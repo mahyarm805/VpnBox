@@ -25,6 +25,9 @@ jobs:
       with:
         gradle-version: '8.11.1'
 
+    - name: Set Gradle Memory
+      run: echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
+
     - name: Build Debug APK
       run: gradle assembleDebug
 
