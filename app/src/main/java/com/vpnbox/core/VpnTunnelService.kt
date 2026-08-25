@@ -290,7 +290,7 @@ class VpnTunnelService : VpnService() {
         try {
             // Kill sing-box process
             singBoxProcess?.let { proc ->
-                Log.d(TAG, "Destroying sing-box process (pid=${proc.pid()})")
+                Log.d(TAG, "Destroying sing-box process")
                 proc.destroy()
                 // Give it a moment to die, then force-kill if needed
                 try {

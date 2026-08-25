@@ -75,8 +75,7 @@ class HomeViewModel @Inject constructor(
                 var attempts = 0
                 while (attempts < 30) {
                     delay(500)
-                    val service = VpnTunnelService.getInstance()
-                    if (service != null && service.isRunning()) {
+                    if (VpnTunnelService.isCoreRunning()) {
                         Log.d(TAG, "VPN connected successfully")
                         _connectionState.value = ConnectionState.CONNECTED
                         connectionStartTime = System.currentTimeMillis()
