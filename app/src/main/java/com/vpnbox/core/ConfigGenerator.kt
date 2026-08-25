@@ -1,5 +1,3 @@
-package com.vpnbox.core
-
 import com.vpnbox.data.model.Protocol
 import com.vpnbox.data.model.ServerConfig
 import com.google.gson.JsonObject
@@ -21,7 +19,10 @@ class ConfigGenerator {
 
     private fun generateDnsConfig(): JsonObject {
         return JsonObject().apply {
-            addProperty("servers", "[{\"address\": \"8.8.8.8\", \"detour\": \"direct\"}]")
+            addProperty(
+                "servers",
+                "[{\"address\": \"8.8.8.8\", \"detour\": \"direct\"}]"
+            )
         }
     }
 
@@ -57,8 +58,8 @@ class ConfigGenerator {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("method", server.security)
-            addProperty("password", server.password)
+            addProperty("method", server.security ?: "")
+            addProperty("password", server.password ?: "")
         }
     }
 
@@ -68,8 +69,8 @@ class ConfigGenerator {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("uuid", server.uuid)
-            addProperty("security", server.security)
+            addProperty("uuid", server.uuid ?: "")
+            addProperty("security", server.security ?: "")
             addProperty("alter_id", server.alterId)
             add("vmess_settings", JsonObject().apply {
                 add("vnext", JsonArray().apply {
@@ -78,9 +79,9 @@ class ConfigGenerator {
                         addProperty("port", server.port)
                         add("users", JsonArray().apply {
                             add(JsonObject().apply {
-                                addProperty("id", server.uuid)
+                                addProperty("id", server.uuid ?: "")
                                 addProperty("alterId", server.alterId)
-                                addProperty("security", server.security)
+                                addProperty("security", server.security ?: "")
                             })
                         })
                     })
@@ -95,15 +96,16 @@ class ConfigGenerator {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("uuid", server.uuid)
+            addProperty("uuid", server.uuid ?: "")
             addProperty("flow", server.flow ?: "")
             add("tls", JsonObject().apply {
                 addProperty("enabled", true)
                 addProperty("server_name", server.sni ?: server.address)
+
                 if (server.fingerprint != null) {
                     add("utls", JsonObject().apply {
                         addProperty("enabled", true)
-                        addProperty("fingerprint", server.fingerprint)
+                        addProperty("fingerprint", server.fingerprint ?: "")
                     })
                 }
             })
@@ -116,7 +118,7 @@ class ConfigGenerator {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("password", server.password)
+            addProperty("password", server.password ?: "")
             add("tls", JsonObject().apply {
                 addProperty("enabled", true)
                 addProperty("server_name", server.sni ?: server.address)
@@ -130,9 +132,10 @@ class ConfigGenerator {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
+
             if (server.password != null) {
                 addProperty("username", server.uuid ?: "")
-                addProperty("password", server.password)
+                addProperty("password", server.password ?: "")
             }
         }
     }
@@ -143,9 +146,10 @@ class ConfigGenerator {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
+
             if (server.password != null) {
                 addProperty("username", server.uuid ?: "")
-                addProperty("password", server.password)
+                addProperty("password", server.password ?: "")
             }
         }
     }
@@ -156,7 +160,7 @@ class ConfigGenerator {
             addProperty("tag", "proxy")
             addProperty("server", server.address)
             addProperty("server_port", server.port)
-            addProperty("password", server.password)
+            addProperty("password", server.password ?: "")
             addProperty("tls", JsonObject().apply {
                 addProperty("enabled", true)
                 addProperty("server_name", server.sni ?: server.address)
@@ -166,8 +170,14 @@ class ConfigGenerator {
 
     fun generateChainConfig(servers: List<ServerConfig>): String {
         val outbounds = JsonArray()
+
         servers.forEachIndexed { index, server ->
-            val tag = if (index == servers.lastIndex) "proxy" else "chain-$index"
+            val tag = if (index == servers.lastIndex) {
+                "proxy"
+            } else {
+                "chain-$index"
+            }
+
             outbounds.add(generateOutboundForChain(server, tag))
         }
 
@@ -177,10 +187,14 @@ class ConfigGenerator {
             add("inbounds", generateInbounds())
             add("outbounds", outbounds)
         }
+
         return config.toString()
     }
 
-    private fun generateOutboundForChain(server: ServerConfig, tag: String): JsonObject {
+    private fun generateOutboundForChain(
+        server: ServerConfig,
+        tag: String
+    ): JsonObject {
         val outbound = generateOutbound(server)
         outbound.addProperty("tag", tag)
         return outbound
