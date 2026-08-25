@@ -1,7 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.VpnBox" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">@color/black</item>
-        <item name="android:navigationBarColor">@color/black</item>
+    <style name="Theme.WhiteHole" parent="Theme.Material3.Dark.NoActionBar">
+        <!-- Primary colors - Blue/White -->
+        <item name="colorPrimary">@color/blue_primary</item>
+        <item name="colorPrimaryContainer">@color/blue_primary_dark</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorOnPrimaryContainer">@color/blue_light</item>
+
+        <!-- Secondary colors -->
+        <item name="colorSecondary">@color/blue_accent</item>
+        <item name="colorSecondaryContainer">@color/blue_accent_dark</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="colorOnSecondaryContainer">@color/blue_light</item>
+
+        <!-- Background -->
+        <item name="android:colorBackground">@color/dark_background</item>
+        <item name="colorSurface">@color/dark_surface</item>
+        <item name="colorSurfaceVariant">@color/dark_surface_variant</item>
+        <item name="colorOnSurface">@color/white</item>
+        <item name="colorOnSurfaceVariant">@color/grey_light</item>
+
+        <!-- Status bar -->
+        <item name="android:statusBarColor">@color/dark_background</item>
+        <item name="android:navigationBarColor">@color/dark_background</item>
     </style>
+
+    <style name="Theme.WhiteHole.Startup" parent="Theme.WhiteHole">
+        <item name="android:windowBackground">@color/dark_background</item>
+    </style>
+
+    <!-- Color palette -->
+    <color name="blue_primary">#4A9EFF</color>
+    <color name="blue_primary_dark">#1A3A6E</color>
+    <color name="blue_accent">#80C0FF</color>
+    <color name="blue_accent_dark">#0D2847</color>
+    <color name="blue_light">#B0D4FF</color>
+    <color name="white">#FFFFFF</color>
+    <color name="dark_background">#0A1628</color>
+    <color name="dark_surface">#0F1D32</color>
+    <color name="dark_surface_variant">#152540</color>
+    <color name="grey_light">#8899AA</color>
 </resources>
