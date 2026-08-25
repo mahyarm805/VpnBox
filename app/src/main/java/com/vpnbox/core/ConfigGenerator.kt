@@ -166,7 +166,7 @@ class ConfigGenerator @Inject constructor() {
             addProperty("server", server.address)
             addProperty("server_port", server.port)
             addProperty("password", server.password ?: "")
-            addProperty("tls", JsonObject().apply {
+            add("tls", JsonObject().apply {
                 addProperty("enabled", true)
                 addProperty("server_name", server.sni ?: server.address)
             })
