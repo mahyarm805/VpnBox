@@ -67,7 +67,7 @@ class HomeViewModel @Inject constructor(
         }
 
         try {
-            context.startForegroundService(intent)
+            context.startService(intent)
             Log.d(TAG, "VPN service start command sent")
 
             // Poll for service readiness

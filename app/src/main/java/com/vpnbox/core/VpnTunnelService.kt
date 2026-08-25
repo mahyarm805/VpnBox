@@ -341,7 +341,7 @@ class VpnTunnelService : VpnService() {
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("VpnBox")
+            .setContentTitle("WhiteHole")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
