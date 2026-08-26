@@ -237,7 +237,7 @@ class VpnTunnelService : VpnService() {
      * Search for the sing-box binary in multiple locations.
      * Returns the absolute path if found, null otherwise.
      */
-    private fun findSingBoxBinary(): String? {
+    private suspend fun findSingBoxBinary(): String? {
         // Priority 0: SingBoxManager managed install
         if (SingBoxManager.isInstalled(applicationContext)) {
             val path = SingBoxManager.getBinaryPath(applicationContext)
@@ -293,18 +293,18 @@ class VpnTunnelService : VpnService() {
         synchronized(coreLogs) {
             coreLogs.appendLine("[INFO] sing-box binary not found, downloading...")
         }
-        val downloadResult = SingBoxManager.download(applicationContext) { progress ->
+        val downloadPath = SingBoxManager.download(applicationContext) { progress ->
             Log.d(TAG, "Download progress: ${(progress * 100).toInt()}%")
             synchronized(coreLogs) {
                 coreLogs.appendLine("[INFO] Download progress: ${(progress * 100).toInt()}%")
             }
         }
-        if (downloadResult.isSuccess) {
-            val path = downloadResult.getOrNull()!!
+        if (downloadPath != null) {
+            val path = downloadPath!!
             Log.i(TAG, "sing-box downloaded to: $path")
             return path
         } else {
-            val error = downloadResult.exceptionOrNull()?.message ?: "Unknown error"
+            val error = "Download failed"
             Log.e(TAG, "sing-box download failed: $error")
             synchronized(coreLogs) {
                 coreLogs.appendLine("[ERR] sing-box download failed: $error")
