@@ -77,10 +77,30 @@ object SingBoxManager {
     /**
      * Download sing-box from GitHub releases. Returns path on success, null on failure.
      */
+    private var isDownloading = false
+
     suspend fun download(
         context: Context,
         onProgress: (Float) -> Unit = {}
     ): String? = withContext(Dispatchers.IO) {
+        // Don't download if already installed
+        if (isInstalled(context)) {
+            Log.d(TAG, "sing-box already installed, skipping download")
+            val path = getBinaryPath(context)
+            onProgress(100f)
+            return@withContext path
+        }
+
+        // Don't download if already in progress
+        if (isDownloading) {
+            Log.d(TAG, "Download already in progress, waiting...")
+            while (isDownloading) delay(500)
+            val path = findBinary(context)
+            onProgress(100f)
+            return@withContext path
+        }
+
+        isDownloading = true
         try {
             val arch = when {
                 Build.SUPPORTED_ABIS.isNotEmpty() -> Build.SUPPORTED_ABIS[0]
@@ -109,6 +129,11 @@ object SingBoxManager {
             connection.connect()
 
             val totalSize = connection.contentLength.toLong()
+            Log.d(TAG, "Content-Length: $totalSize bytes")
+
+            // If content-length is unknown, estimate ~15MB for sing-box
+            val estimatedSize = if (totalSize > 0) totalSize else 15_000_000L
+
             val inputStream = connection.inputStream
             val outputStream = outputFile.outputStream()
 
@@ -119,14 +144,14 @@ object SingBoxManager {
             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                 outputStream.write(buffer, 0, bytesRead)
                 totalRead += bytesRead
-                if (totalSize > 0) {
-                    val progress = 10f + (totalRead.toFloat() / totalSize * 70f)
-                    onProgress(progress.coerceIn(10f, 80f))
-                }
+                val progress = 10f + (totalRead.toFloat() / estimatedSize * 70f)
+                onProgress(progress.coerceIn(10f, 80f))
             }
             outputStream.close()
             inputStream.close()
             connection.disconnect()
+
+            Log.d(TAG, "Downloaded $totalRead bytes")
 
             if (outputFile.length() == 0L) {
                 Log.e(TAG, "Downloaded file is empty")
@@ -137,6 +162,7 @@ object SingBoxManager {
             // Extract from tar.gz
             Log.d(TAG, "Extracting tar.gz...")
             val extractDir = File(context.cacheDir, "sing-box-extract")
+            extractDir.deleteRecursively()
             extractDir.mkdirs()
 
             val tarProcess = ProcessBuilder(
@@ -155,6 +181,7 @@ object SingBoxManager {
             val binary = findFileRecursive(extractDir, "sing-box")
             if (binary == null) {
                 Log.e(TAG, "sing-box binary not found after extraction")
+                Log.d(TAG, "Extracted files: ${extractDir.listFiles()?.map { it.name }}")
                 return@withContext null
             }
             onProgress(90f)
@@ -177,6 +204,8 @@ object SingBoxManager {
         } catch (e: Exception) {
             Log.e(TAG, "Download failed", e)
             null
+        } finally {
+            isDownloading = false
         }
     }
 
