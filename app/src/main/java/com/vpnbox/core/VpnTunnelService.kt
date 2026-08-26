@@ -17,6 +17,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
+import com.vpnbox.core.SingBoxManager
 
 class VpnTunnelService : VpnService() {
 
@@ -218,7 +219,7 @@ class VpnTunnelService : VpnService() {
      */
     private fun buildTunInterface(serverName: String): ParcelFileDescriptor? {
         val builder = Builder()
-        builder.setSession("VpnBox - $serverName")
+        builder.setSession("WhiteHole - $serverName")
             .addAddress("10.0.0.2", 32)
             .addRoute("0.0.0.0", 0)
             .addDnsServer("8.8.8.8")
@@ -237,6 +238,13 @@ class VpnTunnelService : VpnService() {
      * Returns the absolute path if found, null otherwise.
      */
     private fun findSingBoxBinary(): String? {
+        // Priority 0: SingBoxManager managed install
+        if (SingBoxManager.isInstalled(applicationContext)) {
+            val path = SingBoxManager.getBinaryPath(applicationContext)
+            Log.d(TAG, "Found sing-box via SingBoxManager: $path")
+            return path
+        }
+
         // Priority 1: Native libs dir (shipped with APK)
         val nativeLibPath = "${applicationInfo.nativeLibraryDir}/libsing-box.so"
         val nativeLibFile = File(nativeLibPath)
@@ -280,7 +288,29 @@ class VpnTunnelService : VpnService() {
             Log.d(TAG, "which sing-box failed: ${e.message}")
         }
 
-        return null
+        // sing-box not found - try downloading
+        Log.i(TAG, "sing-box not found, attempting download...")
+        synchronized(coreLogs) {
+            coreLogs.appendLine("[INFO] sing-box binary not found, downloading...")
+        }
+        val downloadResult = SingBoxManager.download(applicationContext) { progress ->
+            Log.d(TAG, "Download progress: ${(progress * 100).toInt()}%")
+            synchronized(coreLogs) {
+                coreLogs.appendLine("[INFO] Download progress: ${(progress * 100).toInt()}%")
+            }
+        }
+        if (downloadResult.isSuccess) {
+            val path = downloadResult.getOrNull()!!
+            Log.i(TAG, "sing-box downloaded to: $path")
+            return path
+        } else {
+            val error = downloadResult.exceptionOrNull()?.message ?: "Unknown error"
+            Log.e(TAG, "sing-box download failed: $error")
+            synchronized(coreLogs) {
+                coreLogs.appendLine("[ERR] sing-box download failed: $error")
+            }
+            return null
+        }
     }
 
     /**
