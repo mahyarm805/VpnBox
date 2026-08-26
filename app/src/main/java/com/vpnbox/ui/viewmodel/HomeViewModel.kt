@@ -38,6 +38,9 @@ class HomeViewModel @Inject constructor(
     private val _errorMessage = MutableStateFlow("")
     val errorMessage: StateFlow<String> = _errorMessage.asStateFlow()
 
+    private val _coreLogs = MutableStateFlow("")
+    val coreLogs: StateFlow<String> = _coreLogs.asStateFlow()
+
     private var connectionStartTime: Long = 0
 
     init {
@@ -65,6 +68,7 @@ class HomeViewModel @Inject constructor(
 
         Log.d(TAG, "Connecting to: ${server.name} (${server.protocol.displayName})")
         _errorMessage.value = ""
+        _coreLogs.value = ""
         _connectionState.value = ConnectionState.CONNECTING
 
         val intent = Intent(context, VpnTunnelService::class.java).apply {
@@ -79,8 +83,12 @@ class HomeViewModel @Inject constructor(
 
             viewModelScope.launch {
                 var attempts = 0
-                while (attempts < 20) {
+                while (attempts < 30) {
                     delay(500)
+
+                    // Refresh logs on every poll
+                    _coreLogs.value = VpnTunnelService.getCoreLogs()
+
                     if (VpnTunnelService.isCoreRunning()) {
                         Log.d(TAG, "VPN core running - connected!")
                         _connectionState.value = ConnectionState.CONNECTED
@@ -89,30 +97,25 @@ class HomeViewModel @Inject constructor(
                         startTimer()
                         return@launch
                     }
+
+                    // Check if service already set an error
+                    val serviceError = VpnTunnelService.getLastError()
+                    if (serviceError.isNotEmpty() && attempts > 2) {
+                        Log.e(TAG, "Connection failed: $serviceError")
+                        _errorMessage.value = serviceError
+                        _connectionState.value = ConnectionState.ERROR
+                        return@launch
+                    }
+
                     attempts++
                 }
 
-                // Check logs for specific error
-                val logs = VpnTunnelService.getCoreLogs()
-                val lastConfig = VpnTunnelService.getLastConfig()
-
-                val errorMsg = when {
-                    logs.contains("sing-box not found") ||
-                    logs.contains("not found in any") ->
-                        "sing-box core not found. Check Debug screen."
-                    logs.contains("Configuration file error") ->
-                        "Config error. Check Debug screen."
-                    logs.contains("address already in use") ->
-                        "Port already in use"
-                    logs.contains("connection refused") ->
-                        "Server connection refused"
-                    logs.contains("tls:") ->
-                        "TLS handshake failed"
-                    else -> "Connection timeout. Check Debug screen for details."
-                }
-
-                Log.e(TAG, "Connection failed: $errorMsg")
-                _errorMessage.value = errorMsg
+                // Timeout — show whatever error we have
+                val finalError = VpnTunnelService.getLastError()
+                    .ifEmpty { "Connection timeout" }
+                Log.e(TAG, "Connection failed: $finalError")
+                _errorMessage.value = finalError
+                _coreLogs.value = VpnTunnelService.getCoreLogs()
                 _connectionState.value = ConnectionState.ERROR
             }
         } catch (e: Exception) {
@@ -134,6 +137,7 @@ class HomeViewModel @Inject constructor(
                 _connectionState.value = ConnectionState.DISCONNECTED
                 _connectionTime.value = "00:00:00"
                 _errorMessage.value = ""
+                _coreLogs.value = ""
             } catch (e: Exception) {
                 Log.e(TAG, "Disconnect failed", e)
                 _errorMessage.value = "Disconnect error: ${e.message}"

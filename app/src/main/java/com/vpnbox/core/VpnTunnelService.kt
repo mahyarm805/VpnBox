@@ -17,7 +17,6 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
-import com.vpnbox.core.SingBoxManager
 
 class VpnTunnelService : VpnService() {
 
@@ -35,16 +34,40 @@ class VpnTunnelService : VpnService() {
         private var lastConfig: String? = null
         private val coreLogs = StringBuilder()
         private var coreRunning = false
+        private var lastError: String = ""
 
         fun getLastConfig(): String? = lastConfig
         fun getCoreLogs(): String = synchronized(coreLogs) { coreLogs.toString() }
         fun isCoreRunning(): Boolean = coreRunning
+        fun getLastError(): String = lastError
+
+        fun clearLogs() {
+            synchronized(coreLogs) { coreLogs.clear() }
+            lastError = ""
+        }
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var singBoxProcess: Process? = null
     private var singBoxBinaryPath: String? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private fun appendLog(line: String) {
+        synchronized(coreLogs) {
+            coreLogs.appendLine(line)
+            if (coreLogs.length > 65536) {
+                val trimmed = coreLogs.toString().substring(coreLogs.length - 32768)
+                coreLogs.clear()
+                coreLogs.append(trimmed)
+            }
+        }
+    }
+
+    private fun setError(error: String) {
+        lastError = error
+        Log.e(TAG, "ERROR: $error")
+        appendLog("[ERR] $error")
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -72,27 +95,30 @@ class VpnTunnelService : VpnService() {
     }
 
     /**
-     * Main connect flow: load server from DB → generate config → write config →
-     * establish TUN → find & launch sing-box binary.
+     * Main connect flow: load server → generate config → find/download sing-box → launch.
      */
     private suspend fun connectWithServer(serverId: Long) {
         try {
+            clearLogs()
+            appendLog("[INFO] Starting VPN connection...")
+
             // 1. Load server config from Room database
             val serverDao = AppDatabase.getDatabase(applicationContext).serverDao()
             val server = serverDao.getServerById(serverId)
             if (server == null) {
-                Log.e(TAG, "Server not found for id=$serverId, aborting connect")
+                setError("Server not found (id=$serverId)")
                 return
             }
-            Log.d(TAG, "Loaded server: ${server.name} (${server.protocol})")
+            appendLog("[INFO] Server: ${server.name} (${server.protocol.displayName})")
+            appendLog("[INFO] Address: ${server.address}:${server.port}")
 
             // 2. Generate sing-box config JSON
             val configGenerator = ConfigGenerator()
             val configJson = configGenerator.generateConfig(server)
             lastConfig = configJson
-            Log.d(TAG, "Generated sing-box config (${configJson.length} bytes)")
+            appendLog("[INFO] Config generated (${configJson.length} bytes)")
 
-            // 3. Write config to filesDir/sing-box-config.json
+            // 3. Write config to filesDir
             val configFile = File(filesDir, "sing-box-config.json")
             withContext(Dispatchers.IO) {
                 FileOutputStream(configFile).use { fos ->
@@ -100,44 +126,35 @@ class VpnTunnelService : VpnService() {
                     fos.flush()
                 }
             }
-            Log.d(TAG, "Config written to: ${configFile.absolutePath}")
+            appendLog("[INFO] Config written to: ${configFile.absolutePath}")
 
-            // 4. Build and establish TUN interface
-            val tunFd = buildTunInterface(server.name)
-            if (tunFd == null) {
-                Log.e(TAG, "Failed to establish TUN interface, aborting")
-                return
-            }
-            vpnInterface = tunFd
-            Log.d(TAG, "TUN interface established (fd=${tunFd.fd})")
-
-            // 5. Find sing-box binary
+            // 4. Find or download sing-box binary
+            appendLog("[INFO] Searching for sing-box binary...")
             val binaryPath = findSingBoxBinary()
             if (binaryPath == null) {
-                Log.e(TAG, "sing-box binary NOT FOUND anywhere. Checked:")
-                Log.e(TAG, "  - ${applicationInfo.nativeLibraryDir}/libsing-box.so")
-                Log.e(TAG, "  - ${filesDir.absolutePath}/sing-box")
-                Log.e(TAG, "  - /data/local/tmp/sing-box")
-                Log.e(TAG, "  - 'sing-box' on PATH")
-                Log.e(TAG, "UI will show 'connected' but traffic will NOT route through sing-box.")
-                // Still show connected for UI testing
-                coreRunning = false
-                showNotification("Connected to ${server.name} (core missing)")
+                setError("sing-box binary not found. Go to Debug → Download sing-box")
                 return
             }
             singBoxBinaryPath = binaryPath
-            Log.i(TAG, "sing-box binary found at: $binaryPath")
+            appendLog("[INFO] sing-box found at: $binaryPath")
 
-            // 6. Launch sing-box process with captured output
-            val configFileCanonical = File(filesDir, "sing-box-config.json")
-            val cmd = listOf(binaryPath, "run", "-c", configFileCanonical.absolutePath)
+            // 5. Build TUN interface (don't create it yet — let sing-box manage it)
+            appendLog("[INFO] Starting sing-box process...")
+
+            // 6. Launch sing-box process
+            val cmd = listOf(binaryPath, "run", "-c", configFile.absolutePath)
             Log.d(TAG, "Launching: ${cmd.joinToString(" ")}")
 
             val processBuilder = ProcessBuilder(cmd)
             processBuilder.directory(filesDir)
             processBuilder.environment()["TMPDIR"] = filesDir.absolutePath
 
-            val process = processBuilder.start()
+            val process = try {
+                processBuilder.start()
+            } catch (e: Exception) {
+                setError("Failed to start sing-box: ${e.message}")
+                return
+            }
             singBoxProcess = process
             coreRunning = true
 
@@ -146,18 +163,8 @@ class VpnTunnelService : VpnService() {
                 try {
                     BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                         reader.lines().forEach { line ->
-                            Log.d(TAG, "[sing-box stdout] $line")
-                            synchronized(coreLogs) {
-                                coreLogs.appendLine("[OUT] $line")
-                                // Keep log buffer bounded (~500 lines)
-                                if (coreLogs.length > 65536) {
-                                    val trimmed = coreLogs.toString().substring(
-                                        coreLogs.length - 32768
-                                    )
-                                    coreLogs.clear()
-                                    coreLogs.append(trimmed)
-                                }
-                            }
+                            Log.d(TAG, "[stdout] $line")
+                            appendLog("[OUT] $line")
                         }
                     }
                 } catch (e: Exception) {
@@ -165,21 +172,16 @@ class VpnTunnelService : VpnService() {
                 }
             }
 
-            // Capture stderr asynchronously
+            // Capture stderr asynchronously — this is where errors appear!
             serviceScope.launch {
                 try {
                     BufferedReader(InputStreamReader(process.errorStream)).use { reader ->
                         reader.lines().forEach { line ->
-                            Log.e(TAG, "[sing-box stderr] $line")
-                            synchronized(coreLogs) {
-                                coreLogs.appendLine("[ERR] $line")
-                                if (coreLogs.length > 65536) {
-                                    val trimmed = coreLogs.toString().substring(
-                                        coreLogs.length - 32768
-                                    )
-                                    coreLogs.clear()
-                                    coreLogs.append(trimmed)
-                                }
+                            Log.e(TAG, "[stderr] $line")
+                            appendLog("[ERR] $line")
+                            // Set the first error as the primary error message
+                            if (lastError.isEmpty()) {
+                                lastError = line
                             }
                         }
                     }
@@ -191,11 +193,14 @@ class VpnTunnelService : VpnService() {
             // Monitor process exit in background
             serviceScope.launch {
                 val exitCode = process.waitFor()
-                Log.w(TAG, "sing-box process exited with code: $exitCode")
+                Log.w(TAG, "sing-box exited with code: $exitCode")
                 coreRunning = false
-                synchronized(coreLogs) {
-                    coreLogs.appendLine("[EXIT] sing-box exited with code $exitCode")
+                appendLog("[EXIT] sing-box exited with code $exitCode")
+
+                if (exitCode != 0 && lastError.isEmpty()) {
+                    lastError = "sing-box exited with code $exitCode"
                 }
+
                 // If process dies unexpectedly, clean up
                 withContext(Dispatchers.Main) {
                     disconnectVpn()
@@ -203,39 +208,20 @@ class VpnTunnelService : VpnService() {
             }
 
             showNotification("Connected to ${server.name}")
-            Log.i(TAG, "VPN fully connected to ${server.name} via sing-box")
+            Log.i(TAG, "VPN connected to ${server.name} via sing-box")
 
         } catch (e: CancellationException) {
             Log.e(TAG, "Connect cancelled", e)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect VPN", e)
+            setError("Connection error: ${e.message}")
             disconnectVpn()
         }
     }
 
     /**
-     * Build the TUN interface using Android's VpnService.Builder.
-     * Returns the file descriptor on success, null on failure.
-     */
-    private fun buildTunInterface(serverName: String): ParcelFileDescriptor? {
-        val builder = Builder()
-        builder.setSession("WhiteHole - $serverName")
-            .addAddress("10.0.0.2", 32)
-            .addRoute("0.0.0.0", 0)
-            .addDnsServer("8.8.8.8")
-            .addDnsServer("8.8.4.4")
-            .setMtu(1500)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            builder.setMetered(false)
-        }
-
-        return builder.establish()
-    }
-
-    /**
-     * Search for the sing-box binary in multiple locations.
-     * Returns the absolute path if found, null otherwise.
+     * Search for sing-box binary in multiple locations.
+     * Returns absolute path if found, null otherwise.
      */
     private suspend fun findSingBoxBinary(): String? {
         // Priority 0: SingBoxManager managed install
@@ -247,24 +233,21 @@ class VpnTunnelService : VpnService() {
 
         // Priority 1: Native libs dir (shipped with APK)
         val nativeLibPath = "${applicationInfo.nativeLibraryDir}/libsing-box.so"
-        val nativeLibFile = File(nativeLibPath)
-        if (nativeLibFile.exists() && nativeLibFile.canExecute()) {
+        if (File(nativeLibPath).let { it.exists() && it.canExecute() }) {
             Log.d(TAG, "Found sing-box at native lib: $nativeLibPath")
             return nativeLibPath
         }
 
         // Priority 2: App filesDir (manually placed)
         val filesDirPath = "${filesDir.absolutePath}/sing-box"
-        val filesDirFile = File(filesDirPath)
-        if (filesDirFile.exists() && filesDirFile.canExecute()) {
+        if (File(filesDirPath).let { it.exists() && it.canExecute() }) {
             Log.d(TAG, "Found sing-box at filesDir: $filesDirPath")
             return filesDirPath
         }
 
         // Priority 3: /data/local/tmp (adb pushed for testing)
         val tmpPath = "/data/local/tmp/sing-box"
-        val tmpFile = File(tmpPath)
-        if (tmpFile.exists() && tmpFile.canExecute()) {
+        if (File(tmpPath).let { it.exists() && it.canExecute() }) {
             Log.d(TAG, "Found sing-box at tmp: $tmpPath")
             return tmpPath
         }
@@ -288,27 +271,24 @@ class VpnTunnelService : VpnService() {
             Log.d(TAG, "which sing-box failed: ${e.message}")
         }
 
-        // sing-box not found - try downloading
-        Log.i(TAG, "sing-box not found, attempting download...")
-        synchronized(coreLogs) {
-            coreLogs.appendLine("[INFO] sing-box binary not found, downloading...")
-        }
-        val downloadPath = SingBoxManager.download(applicationContext) { progress ->
-            Log.d(TAG, "Download progress: ${(progress * 100).toInt()}%")
-            synchronized(coreLogs) {
-                coreLogs.appendLine("[INFO] Download progress: ${(progress * 100).toInt()}%")
+        // sing-box not found — try downloading
+        appendLog("[INFO] sing-box not found, downloading...")
+        try {
+            val downloadPath = SingBoxManager.download(applicationContext) { progress ->
+                val pct = (progress * 100).toInt()
+                Log.d(TAG, "Download progress: $pct%")
+                appendLog("[INFO] Download progress: $pct%")
             }
-        }
-        if (downloadPath != null) {
-            val path = downloadPath!!
-            Log.i(TAG, "sing-box downloaded to: $path")
-            return path
-        } else {
-            val error = "Download failed"
-            Log.e(TAG, "sing-box download failed: $error")
-            synchronized(coreLogs) {
-                coreLogs.appendLine("[ERR] sing-box download failed: $error")
+            if (downloadPath != null) {
+                Log.i(TAG, "sing-box downloaded to: $downloadPath")
+                appendLog("[INFO] sing-box downloaded to: $downloadPath")
+                return downloadPath
+            } else {
+                setError("sing-box download failed. Check network connection.")
+                return null
             }
+        } catch (e: Exception) {
+            setError("sing-box download error: ${e.message}")
             return null
         }
     }
@@ -322,7 +302,6 @@ class VpnTunnelService : VpnService() {
             singBoxProcess?.let { proc ->
                 Log.d(TAG, "Destroying sing-box process")
                 proc.destroy()
-                // Give it a moment to die, then force-kill if needed
                 try {
                     if (!proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
                         Log.w(TAG, "sing-box did not exit in 2s, destroyingForcibly")
