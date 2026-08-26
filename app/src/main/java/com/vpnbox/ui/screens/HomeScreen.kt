@@ -1,7 +1,6 @@
 package com.vpnbox.ui.screens
 
 import android.app.Activity
-import android.content.Intent
 import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,6 +30,7 @@ fun HomeScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     val currentServer by viewModel.currentServer.collectAsState()
     val connectionTime by viewModel.connectionTime.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
     val context = LocalContext.current
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
@@ -62,14 +62,16 @@ fun HomeScreen(
             verticalArrangement = Arrangement.Center
         ) {
             // Connection Status
+            val statusText = when (connectionState) {
+                ConnectionState.CONNECTED -> "Connected"
+                ConnectionState.CONNECTING -> "Connecting..."
+                ConnectionState.DISCONNECTED -> "Disconnected"
+                ConnectionState.DISCONNECTING -> "Disconnecting..."
+                ConnectionState.ERROR -> "Connection Failed"
+            }
+
             Text(
-                text = when (connectionState) {
-                    ConnectionState.CONNECTED -> "Connected"
-                    ConnectionState.CONNECTING -> "Connecting..."
-                    ConnectionState.DISCONNECTED -> "Disconnected"
-                    ConnectionState.DISCONNECTING -> "Disconnecting..."
-                    ConnectionState.ERROR -> "No server selected"
-                },
+                text = statusText,
                 style = MaterialTheme.typography.headlineMedium,
                 color = when (connectionState) {
                     ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
@@ -80,13 +82,24 @@ fun HomeScreen(
                 }
             )
 
+            // Error details
+            if (connectionState == ConnectionState.ERROR && errorMessage.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                )
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // Current Server
             Text(
                 text = currentServer?.let { "${it.protocol.displayName} - ${it.name}" } ?: "No server selected",
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (currentServer != null) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -97,20 +110,21 @@ fun HomeScreen(
                 onClick = {
                     when (connectionState) {
                         ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
-                            // Check if VPN permission is needed
+                            if (currentServer == null) {
+                                viewModel.setErrorMessage("Please select a server first")
+                                return@ConnectionButton
+                            }
                             val prepareIntent = VpnService.prepare(context)
                             if (prepareIntent != null) {
-                                // Permission needed - launch system dialog
                                 vpnPermissionLauncher.launch(prepareIntent)
                             } else {
-                                // Permission already granted - connect directly
                                 viewModel.connectVpn(context)
                             }
                         }
                         ConnectionState.CONNECTED -> {
                             viewModel.disconnectVpn(context)
                         }
-                        else -> { /* Ignore clicks during transitions */ }
+                        else -> { }
                     }
                 }
             )
@@ -130,11 +144,9 @@ fun HomeScreen(
 
             // Quick Actions
             Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                OutlinedButton(
-                    onClick = onNavigateToServers
-                ) {
+                OutlinedButton(onClick = onNavigateToServers) {
                     Icon(Icons.Default.Link, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Servers")
