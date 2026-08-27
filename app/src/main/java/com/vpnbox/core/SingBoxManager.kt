@@ -193,6 +193,49 @@ object SingBoxManager {
             binary.copyTo(targetFile, overwrite = true)
             targetFile.setExecutable(true, false)
 
+            // Force chmod via runtime (setExecutable may fail on Android due to SELinux)
+            try {
+                Runtime.getRuntime().exec(arrayOf("chmod", "755", targetFile.absolutePath)).waitFor()
+                Log.d(TAG, "chmod 755 applied to: ${targetFile.absolutePath}")
+            } catch (e: Exception) {
+                Log.w(TAG, "chmod failed: ${e.message}")
+            }
+
+            // Verify executable
+            if (!targetFile.canExecute()) {
+                Log.e(TAG, "Binary is NOT executable after chmod! Trying alternative location...")
+                // Try copying to getDir("bin") which may have different permissions
+                val altDir = context.getDir("bin", Context.MODE_PRIVATE)
+                altDir.mkdirs()
+                val altFile = File(altDir, "sing-box")
+                binary.copyTo(altFile, overwrite = true)
+                try {
+                    Runtime.getRuntime().exec(arrayOf("chmod", "755", altFile.absolutePath)).waitFor()
+                } catch (_: Exception) {}
+                if (altFile.canExecute()) {
+                    Log.d(TAG, "Binary executable at alt location: ${altFile.absolutePath}")
+                    // Clean up and use alt path
+                    outputFile.delete()
+                    extractDir.deleteRecursively()
+                    onProgress(100f)
+                    return@withContext altFile.absolutePath
+                }
+
+                // Try /data/local/tmp as last resort
+                val tmpFile = File("/data/local/tmp/sing-box")
+                try {
+                    binary.copyTo(tmpFile, overwrite = true)
+                    Runtime.getRuntime().exec(arrayOf("chmod", "755", tmpFile.absolutePath)).waitFor()
+                    if (tmpFile.canExecute()) {
+                        Log.d(TAG, "Binary executable at tmp: ${tmpFile.absolutePath}")
+                        outputFile.delete()
+                        extractDir.deleteRecursively()
+                        onProgress(100f)
+                        return@withContext tmpFile.absolutePath
+                    }
+                } catch (_: Exception) {}
+            }
+
             // Clean up
             outputFile.delete()
             extractDir.deleteRecursively()
