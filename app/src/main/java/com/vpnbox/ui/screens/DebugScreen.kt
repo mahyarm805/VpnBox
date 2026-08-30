@@ -3,6 +3,7 @@ package com.vpnbox.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -38,6 +39,18 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Pipeline stage data model
+// ══════════════════════════════════════════════════════════════════════════════
+
+data class PipelineStage(
+    val name: String,
+    val status: StageStatus,
+    val details: String
+)
+
+enum class StageStatus { PASS, FAIL, WAITING }
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ViewModel
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -45,6 +58,15 @@ import javax.inject.Inject
 class DebugViewModel @Inject constructor(
     private val configGenerator: ConfigGenerator
 ) : ViewModel() {
+
+    // ── Device info ──────────────────────────────────────────────────────
+    private val _androidVersion = MutableStateFlow("${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+    val androidVersion: StateFlow<String> = _androidVersion.asStateFlow()
+
+    private val _deviceAbi = MutableStateFlow(
+        if (Build.SUPPORTED_ABIS.isNotEmpty()) Build.SUPPORTED_ABIS[0] else Build.CPU_ABI
+    )
+    val deviceAbi: StateFlow<String> = _deviceAbi.asStateFlow()
 
     // ── Sing-box install info ────────────────────────────────────────────
     private val _installInfo = MutableStateFlow(SingBoxManager.InstallInfo(installed = false))
@@ -79,18 +101,29 @@ class DebugViewModel @Inject constructor(
     private val _isCoreRunning = MutableStateFlow(false)
     val isCoreRunning: StateFlow<Boolean> = _isCoreRunning.asStateFlow()
 
+    private val _lastError = MutableStateFlow("")
+    val lastError: StateFlow<String> = _lastError.asStateFlow()
+
+    // ── Pipeline stages ──────────────────────────────────────────────────
+    private val _stages = MutableStateFlow<List<PipelineStage>>(emptyList())
+    val stages: StateFlow<List<PipelineStage>> = _stages.asStateFlow()
+
     // ── Public actions ───────────────────────────────────────────────────
 
-    /** Full refresh: re-read install info, config, logs, and core status. */
+    /** Full refresh: re-read install info, config, logs, core status, and rebuild pipeline. */
     fun refresh(context: Context) {
         viewModelScope.launch {
             _installInfo.value = SingBoxManager.getInstallInfo(context)
         }
+
         _configText.value = configGenerator.getLastConfig()
             .ifEmpty { "No config generated yet." }
         _coreLogsText.value = VpnTunnelService.getCoreLogs()
             .ifEmpty { "No logs available." }
         _isCoreRunning.value = VpnTunnelService.isCoreRunning()
+        _lastError.value = VpnTunnelService.getLastError()
+
+        rebuildPipeline(context)
     }
 
     /** Download sing-box binary with progress updates. */
@@ -105,8 +138,8 @@ class DebugViewModel @Inject constructor(
                     _downloadProgress.value = progress
                 }
                 if (result != null) {
-                    // Refresh install info after successful download
                     _installInfo.value = SingBoxManager.getInstallInfo(context)
+                    rebuildPipeline(context)
                 } else {
                     _downloadError.value = "Download failed. Check your network connection."
                 }
@@ -137,6 +170,125 @@ class DebugViewModel @Inject constructor(
             }
         }
     }
+
+    // ── Private helpers ──────────────────────────────────────────────────
+
+    private fun rebuildPipeline(context: Context) {
+        val info = _installInfo.value
+        val config = _configText.value
+        val logs = _coreLogsText.value
+        val running = _isCoreRunning.value
+        val error = _lastError.value
+        val hasConfig = config.isNotEmpty() && config != "No config generated yet."
+        val logLines = logs.lines().filter { it.isNotBlank() }
+
+        // Stage 1: DOWNLOAD
+        val stage1 = if (info.installed) {
+            PipelineStage("DOWNLOAD", StageStatus.PASS, "sing-box binary is present")
+        } else {
+            PipelineStage("DOWNLOAD", StageStatus.FAIL, "sing-box binary not found — tap Download above")
+        }
+
+        // Stage 2: BINARY FOUND
+        val stage2 = if (info.installed) {
+            PipelineStage("BINARY FOUND", StageStatus.PASS, info.path)
+        } else {
+            PipelineStage("BINARY FOUND", StageStatus.FAIL, "No binary located on device")
+        }
+
+        // Stage 3: BINARY PERMISSION
+        val stage3 = if (info.installed && info.sizeBytes > 0) {
+            val sizeStr = formatSize(info.sizeBytes)
+            PipelineStage("BINARY PERMISSION", StageStatus.PASS, "Executable — $sizeStr, ${info.architecture}")
+        } else if (info.installed) {
+            PipelineStage("BINARY PERMISSION", StageStatus.PASS, "Executable — ${info.architecture}")
+        } else {
+            PipelineStage("BINARY PERMISSION", StageStatus.FAIL, "Cannot check — binary missing")
+        }
+
+        // Stage 4: PROCESS START
+        val stage4 = if (running) {
+            PipelineStage("PROCESS START", StageStatus.PASS, "ProcessBuilder launched successfully")
+        } else if (error.isNotEmpty()) {
+            PipelineStage("PROCESS START", StageStatus.FAIL, error)
+        } else {
+            PipelineStage("PROCESS START", StageStatus.WAITING, "No connection attempt yet")
+        }
+
+        // Stage 5: SING-BOX ALIVE
+        val stage5 = if (running) {
+            PipelineStage("SING-BOX ALIVE", StageStatus.PASS, "sing-box process is running")
+        } else {
+            val exitLog = logLines.lastOrNull { it.startsWith("[EXIT]") }
+            if (exitLog != null) {
+                PipelineStage("SING-BOX ALIVE", StageStatus.FAIL, exitLog)
+            } else {
+                PipelineStage("SING-BOX ALIVE", StageStatus.WAITING, "Not running")
+            }
+        }
+
+        // Stage 6: CONFIG VALIDATION
+        val stage6 = if (hasConfig) {
+            try {
+                // Quick JSON parse check — does the config start with { and end with }?
+                val trimmed = config.trim()
+                if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                    PipelineStage("CONFIG VALIDATION", StageStatus.PASS, "Valid JSON — ${config.length} bytes")
+                } else {
+                    PipelineStage("CONFIG VALIDATION", StageStatus.FAIL, "Config does not look like valid JSON")
+                }
+            } catch (_: Exception) {
+                PipelineStage("CONFIG VALIDATION", StageStatus.FAIL, "Config parse error")
+            }
+        } else {
+            PipelineStage("CONFIG VALIDATION", StageStatus.WAITING, "No config generated yet")
+        }
+
+        // Stage 7: TUN START
+        val tunUp = running && logLines.any { it.contains("tun", ignoreCase = true) && !it.contains("[ERR]") }
+        val stage7 = if (tunUp) {
+            PipelineStage("TUN START", StageStatus.PASS, "TUN interface is active")
+        } else if (running) {
+            PipelineStage("TUN START", StageStatus.WAITING, "sing-box running, TUN status pending")
+        } else {
+            val tunErr = logLines.lastOrNull {
+                it.contains("[ERR]") && it.contains("tun", ignoreCase = true)
+            }
+            if (tunErr != null) {
+                PipelineStage("TUN START", StageStatus.FAIL, tunErr)
+            } else {
+                PipelineStage("TUN START", StageStatus.WAITING, "sing-box not running")
+            }
+        }
+
+        // Stage 8: PROXY CONNECTION
+        val proxyUp = running && logLines.any {
+            it.contains("[OUT]", ignoreCase = true) && !it.contains("[ERR]")
+        }
+        val stage8 = if (proxyUp) {
+            PipelineStage("PROXY CONNECTION", StageStatus.PASS, "Traffic is flowing")
+        } else if (running) {
+            PipelineStage("PROXY CONNECTION", StageStatus.WAITING, "sing-box running, waiting for traffic")
+        } else {
+            val proxyErr = logLines.lastOrNull {
+                it.contains("[ERR]") && (it.contains("connect", ignoreCase = true) || it.contains("proxy", ignoreCase = true))
+            }
+            if (proxyErr != null) {
+                PipelineStage("PROXY CONNECTION", StageStatus.FAIL, proxyErr)
+            } else {
+                PipelineStage("PROXY CONNECTION", StageStatus.WAITING, "No active connection")
+            }
+        }
+
+        _stages.value = listOf(stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8)
+    }
+
+    private fun formatSize(bytes: Long): String {
+        if (bytes <= 0) return "N/A"
+        val kb = bytes / 1024.0
+        val mb = kb / 1024.0
+        return if (mb >= 1.0) String.format("%.1f MB", mb) else String.format("%.0f KB", kb)
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -162,6 +314,10 @@ fun DebugScreen(
     val coreLogsText by viewModel.coreLogsText.collectAsState()
     val isCoreRunning by viewModel.isCoreRunning.collectAsState()
 
+    val stages by viewModel.stages.collectAsState()
+    val androidVersion by viewModel.androidVersion.collectAsState()
+    val deviceAbi by viewModel.deviceAbi.collectAsState()
+
     val context = LocalContext.current
 
     // Initial load
@@ -172,7 +328,7 @@ fun DebugScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Debug – sing-box") },
+                title = { Text("Debug — Pipeline Diagnostics") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -192,12 +348,10 @@ fun DebugScreen(
                 .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            // ── 1. Sing-box Status ────────────────────────────────────────
-            SectionHeader(title = "sing-box Status")
-
+            // ── Device & Binary Info ─────────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -206,74 +360,81 @@ fun DebugScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Installed row
-                    InfoRow(
-                        label = "Installed",
-                        value = if (installInfo.installed) "Yes" else "No",
-                        valueColor = if (installInfo.installed)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.error
+                    Text(
+                        text = "System Info",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-
-                    if (installInfo.installed) {
-                        InfoRow(label = "Version", value = installInfo.version)
-                        InfoRow(label = "Path", value = installInfo.path)
-                        InfoRow(label = "Architecture", value = installInfo.architecture)
-                        InfoRow(
-                            label = "Size",
-                            value = formatSize(installInfo.sizeBytes)
-                        )
-                    } else {
-                        // Not installed → show download button + progress
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        if (isDownloading) {
-                            LinearProgressIndicator(
-                                progress = { downloadProgress / 100f },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp),
-                            )
-                            Text(
-                                text = "Downloading… ${downloadProgress.toInt()}%",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        downloadError?.let { error ->
-                            Text(
-                                text = error,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-
-                        Button(
-                            onClick = { viewModel.download(context) },
-                            enabled = !isDownloading,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(if (isDownloading) "Downloading…" else "Download sing-box")
-                        }
-                    }
+                    InfoRow(label = "Android", value = androidVersion)
+                    InfoRow(label = "Device ABI", value = deviceAbi)
+                    InfoRow(
+                        label = "sing-box version",
+                        value = installInfo.version.ifEmpty { "—" }
+                    )
+                    InfoRow(
+                        label = "Binary path",
+                        value = installInfo.path.ifEmpty { "—" }
+                    )
                 }
             }
 
             HorizontalDivider()
 
-            // ── 2. Test sing-box ──────────────────────────────────────────
-            SectionHeader(title = "Test sing-box")
+            // ── Download controls ────────────────────────────────────────
+            if (!installInfo.installed) {
+                if (isDownloading) {
+                    LinearProgressIndicator(
+                        progress = { downloadProgress / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp),
+                    )
+                    Text(
+                        text = "Downloading… ${downloadProgress.toInt()}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
+                downloadError?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                Button(
+                    onClick = { viewModel.download(context) },
+                    enabled = !isDownloading,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isDownloading) "Downloading…" else "Download sing-box")
+                }
+            }
+
+            // ── Pipeline Stages ──────────────────────────────────────────
+            Text(
+                text = "Pipeline Stages",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            stages.forEach { stage ->
+                PipelineStageCard(stage)
+            }
+
+            // ── Test button ──────────────────────────────────────────────
             OutlinedButton(
                 onClick = { viewModel.testCore(context) },
                 enabled = !isTesting && installInfo.installed,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (isTesting) "Testing…" else "Test sing-box")
+                Text(if (isTesting) "Testing…" else "Test sing-box version")
             }
 
             if (testSuccess != null) {
@@ -312,7 +473,7 @@ fun DebugScreen(
 
             HorizontalDivider()
 
-            // ── 3. Generated Config ───────────────────────────────────────
+            // ── Generated Config ─────────────────────────────────────────
             SectionHeader(title = "Generated Config")
 
             Card(
@@ -358,7 +519,7 @@ fun DebugScreen(
 
             HorizontalDivider()
 
-            // ── 4. Connection Logs ────────────────────────────────────────
+            // ── Connection Logs ──────────────────────────────────────────
             SectionHeader(title = "Connection Logs")
 
             Card(
@@ -375,7 +536,6 @@ fun DebugScreen(
                         .verticalScroll(rememberScrollState())
                 ) {
                     val allLines = coreLogsText.lines().filter { it.isNotBlank() }
-                    // Show last 50 lines
                     val logLines = allLines.takeLast(50)
 
                     if (logLines.isEmpty()) {
@@ -411,7 +571,7 @@ fun DebugScreen(
 
             HorizontalDivider()
 
-            // ── 5. Connection Status ──────────────────────────────────────
+            // ── Connection Status ────────────────────────────────────────
             SectionHeader(title = "Connection Status")
 
             Row(
@@ -438,6 +598,61 @@ fun DebugScreen(
 
             // Bottom spacer
             Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Pipeline stage card composable
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun PipelineStageCard(stage: PipelineStage) {
+    val statusIcon = when (stage.status) {
+        StageStatus.PASS -> "✓"
+        StageStatus.FAIL -> "✗"
+        StageStatus.WAITING -> "⏳"
+    }
+    val statusColor = when (stage.status) {
+        StageStatus.PASS -> Color(0xFF4CAF50)       // green
+        StageStatus.FAIL -> MaterialTheme.colorScheme.error
+        StageStatus.WAITING -> Color(0xFFFFC107)    // yellow/amber
+    }
+    val bgColor = when (stage.status) {
+        StageStatus.PASS -> statusColor.copy(alpha = 0.08f)
+        StageStatus.FAIL -> statusColor.copy(alpha = 0.08f)
+        StageStatus.WAITING -> statusColor.copy(alpha = 0.06f)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = bgColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = statusIcon,
+                fontSize = 18.sp,
+                color = statusColor,
+                modifier = Modifier.padding(end = 12.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stage.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = stage.details,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
