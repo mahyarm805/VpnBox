@@ -1,4 +1,4 @@
-name: Android CI
+concurrency: name: Android CI
 
 on:
   push:
@@ -19,6 +19,37 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      - name: Download sing-box binary
+        run: |
+          echo "=== Downloading sing-box v1.11.4 ==="
+          
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          mkdir -p app/src/main/jniLibs/armeabi-v7a
+          mkdir -p app/src/main/jniLibs/x86_64
+          mkdir -p app/src/main/jniLibs/x86
+          
+          download_singbox() {
+            local arch=$1
+            local target_dir=$2
+            local url="https://github.com/SagerNet/sing-box/releases/download/v1.11.4/sing-box-1.11.4-${arch}.tar.gz"
+            echo "Downloading: $url"
+            curl -L -o /tmp/sing-box-${arch}.tar.gz "$url"
+            mkdir -p /tmp/sing-box-extract
+            tar -xzf /tmp/sing-box-${arch}.tar.gz -C /tmp/sing-box-extract --strip-components=1
+            find /tmp/sing-box-extract -name "sing-box" -type f | head -1 | xargs -I{} cp {} ${target_dir}/libsing-box.so
+            chmod 755 ${target_dir}/libsing-box.so
+            ls -la ${target_dir}/libsing-box.so
+            rm -rf /tmp/sing-box-extract /tmp/sing-box-${arch}.tar.gz
+          }
+          
+          download_singbox "android-arm64" "app/src/main/jniLibs/arm64-v8a"
+          download_singbox "android-arm" "app/src/main/jniLibs/armeabi-v7a"
+          download_singbox "android-amd64" "app/src/main/jniLibs/x86_64"
+          download_singbox "android-x86" "app/src/main/jniLibs/x86"
+          
+          echo "=== All sing-box binaries downloaded ==="
+          find app/src/main/jniLibs -name "libsing-box.so" -exec ls -la {} \;
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
