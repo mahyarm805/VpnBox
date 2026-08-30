@@ -59,6 +59,7 @@ jobs:
               -C "$extract_dir" \
               --strip-components=1
 
+            local binary
             binary="$(find "$extract_dir" -type f -name "sing-box" | head -n 1)"
 
             if [ -z "$binary" ]; then
@@ -76,12 +77,13 @@ jobs:
             rm -f "$archive"
           }
 
+          # Release filename → Android ABI directory
           download_singbox \
             "android-arm64" \
             "$BASE_DIR/arm64-v8a"
 
           download_singbox \
-            "android-arm" \
+            "android-armv7" \
             "$BASE_DIR/armeabi-v7a"
 
           download_singbox \
@@ -89,7 +91,7 @@ jobs:
             "$BASE_DIR/x86_64"
 
           download_singbox \
-            "android-x86" \
+            "android-386" \
             "$BASE_DIR/x86"
 
           echo ""
