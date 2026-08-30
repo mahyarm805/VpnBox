@@ -401,11 +401,12 @@ class VpnTunnelService : VpnService() {
             return nativeLibPath
         }
 
-        // Priority 2: App filesDir (manually placed)
-        val filesDirPath = "${filesDir.absolutePath}/sing-box"
-        if (File(filesDirPath).let { it.exists() && it.canExecute() }) {
-            Log.d(TAG, "Found sing-box at filesDir: $filesDirPath")
-            return filesDirPath
+        // Priority 2: getDir("bin") — downloaded at runtime
+        val binDir = getDir("bin", MODE_PRIVATE)
+        val binDirPath = "${binDir.absolutePath}/sing-box"
+        if (File(binDirPath).let { it.exists() && it.canExecute() }) {
+            Log.d(TAG, "Found sing-box at bin dir: $binDirPath")
+            return binDirPath
         }
 
         // Priority 3: /data/local/tmp (adb pushed for testing)
