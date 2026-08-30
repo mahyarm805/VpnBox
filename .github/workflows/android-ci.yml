@@ -1,10 +1,10 @@
-concurrency: name: Android CI
+name: Android CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   build:
@@ -20,36 +20,95 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Download sing-box binary
+      - name: Download sing-box binaries
+        shell: bash
         run: |
+          set -euo pipefail
+
           echo "=== Downloading sing-box v1.11.4 ==="
-          
-          mkdir -p app/src/main/jniLibs/arm64-v8a
-          mkdir -p app/src/main/jniLibs/armeabi-v7a
-          mkdir -p app/src/main/jniLibs/x86_64
-          mkdir -p app/src/main/jniLibs/x86
-          
+
+          BASE_DIR="app/src/main/jniLibs"
+
+          mkdir -p "$BASE_DIR/arm64-v8a"
+          mkdir -p "$BASE_DIR/armeabi-v7a"
+          mkdir -p "$BASE_DIR/x86_64"
+          mkdir -p "$BASE_DIR/x86"
+
           download_singbox() {
-            local arch=$1
-            local target_dir=$2
+            local arch="$1"
+            local target_dir="$2"
+
             local url="https://github.com/SagerNet/sing-box/releases/download/v1.11.4/sing-box-1.11.4-${arch}.tar.gz"
-            echo "Downloading: $url"
-            curl -L -o /tmp/sing-box-${arch}.tar.gz "$url"
-            mkdir -p /tmp/sing-box-extract
-            tar -xzf /tmp/sing-box-${arch}.tar.gz -C /tmp/sing-box-extract --strip-components=1
-            find /tmp/sing-box-extract -name "sing-box" -type f | head -1 | xargs -I{} cp {} ${target_dir}/libsing-box.so
-            chmod 755 ${target_dir}/libsing-box.so
-            ls -la ${target_dir}/libsing-box.so
-            rm -rf /tmp/sing-box-extract /tmp/sing-box-${arch}.tar.gz
+            local archive="/tmp/sing-box-${arch}.tar.gz"
+            local extract_dir="/tmp/sing-box-extract-${arch}"
+
+            echo ""
+            echo "=== ${arch} ==="
+            echo "URL: ${url}"
+
+            rm -rf "$extract_dir"
+            mkdir -p "$extract_dir"
+
+            curl -fL --retry 3 --retry-delay 2 \
+              -o "$archive" \
+              "$url"
+
+            test -s "$archive"
+
+            tar -xzf "$archive" \
+              -C "$extract_dir" \
+              --strip-components=1
+
+            binary="$(find "$extract_dir" -type f -name "sing-box" | head -n 1)"
+
+            if [ -z "$binary" ]; then
+              echo "ERROR: sing-box binary not found for ${arch}"
+              exit 1
+            fi
+
+            cp "$binary" "$target_dir/libsing-box.so"
+            chmod 755 "$target_dir/libsing-box.so"
+
+            echo "Installed:"
+            ls -lah "$target_dir/libsing-box.so"
+
+            rm -rf "$extract_dir"
+            rm -f "$archive"
           }
-          
-          download_singbox "android-arm64" "app/src/main/jniLibs/arm64-v8a"
-          download_singbox "android-arm" "app/src/main/jniLibs/armeabi-v7a"
-          download_singbox "android-amd64" "app/src/main/jniLibs/x86_64"
-          download_singbox "android-x86" "app/src/main/jniLibs/x86"
-          
-          echo "=== All sing-box binaries downloaded ==="
-          find app/src/main/jniLibs -name "libsing-box.so" -exec ls -la {} \;
+
+          download_singbox \
+            "android-arm64" \
+            "$BASE_DIR/arm64-v8a"
+
+          download_singbox \
+            "android-arm" \
+            "$BASE_DIR/armeabi-v7a"
+
+          download_singbox \
+            "android-amd64" \
+            "$BASE_DIR/x86_64"
+
+          download_singbox \
+            "android-x86" \
+            "$BASE_DIR/x86"
+
+          echo ""
+          echo "=== sing-box binaries ==="
+
+          find "$BASE_DIR" \
+            -name "libsing-box.so" \
+            -type f \
+            -exec ls -lh {} \;
+
+          echo ""
+          echo "=== Verify binaries exist ==="
+
+          test -f "$BASE_DIR/arm64-v8a/libsing-box.so"
+          test -f "$BASE_DIR/armeabi-v7a/libsing-box.so"
+          test -f "$BASE_DIR/x86_64/libsing-box.so"
+          test -f "$BASE_DIR/x86/libsing-box.so"
+
+          echo "All sing-box binaries verified."
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -57,10 +116,30 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
+        run: |
+          gradle assembleDebug --no-daemon
 
       - name: Build Release APK
-        run: gradle assembleRelease --no-daemon
+        run: |
+          gradle assembleRelease --no-daemon
+
+      - name: Verify sing-box is packaged in Debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          echo "=== Checking APK ==="
+          ls -lh "$APK"
+
+          echo ""
+          echo "=== Searching for sing-box native libraries ==="
+
+          unzip -l "$APK" | grep "libsing-box.so"
+
+          echo ""
+          echo "sing-box libraries successfully packaged."
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
