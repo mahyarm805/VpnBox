@@ -30,23 +30,23 @@ object SingBoxManager {
     // ── Data classes ──────────────────────────────────────────────
 
     data class CoreDiagnostics(
-        val androidVersion: Int,
-        val sdkVersion: Int,
-        val deviceAbi: String,
-        val nativeLibPath: String,
-        val nativeLibExists: Boolean,
-        val nativeLibCanExecute: Boolean,
-        val nativeLibSize: Long,
-        val binDirPath: String,
-        val binDirExists: Boolean,
-        val binPath: String,
-        val binExists: Boolean,
-        val binCanRead: Boolean,
-        val binCanExecute: Boolean,
-        val binSize: Long,
-        val activePath: String?,
-        val singBoxVersion: String?,
-        val isInstalled: Boolean
+        val androidVersion: Int = android.os.Build.VERSION.SDK_INT,
+        val sdkVersion: Int = android.os.Build.VERSION.SDK_INT,
+        val deviceAbi: String = if (android.os.Build.SUPPORTED_ABIS.isNotEmpty()) android.os.Build.SUPPORTED_ABIS[0] else "unknown",
+        val nativeLibPath: String = "",
+        val nativeLibExists: Boolean = false,
+        val nativeLibCanExecute: Boolean = false,
+        val nativeLibSize: Long = 0L,
+        val binDirPath: String = "",
+        val binDirExists: Boolean = false,
+        val binPath: String = "",
+        val binExists: Boolean = false,
+        val binCanRead: Boolean = false,
+        val binCanExecute: Boolean = false,
+        val binSize: Long = 0L,
+        val activePath: String? = null,
+        val singBoxVersion: String? = null,
+        val isInstalled: Boolean = false
     )
 
     /** Backward-compatible install info (used by DebugScreen). */
