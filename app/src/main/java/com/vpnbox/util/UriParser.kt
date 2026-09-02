@@ -173,6 +173,7 @@ object UriParser {
         val spx = uriObj.getQueryParameter("spx")
         val allowInsecure = uriObj.getQueryParameter("allowInsecure") == "1"
             || uriObj.getQueryParameter("allowInsecure") == "true"
+        val vlessEncryption = uriObj.getQueryParameter("encryption") ?: "none"
 
         return ServerConfig(
             name = name ?: sni?.let { "VLESS - $it" } ?: "VLESS Server",
@@ -183,7 +184,7 @@ object UriParser {
             sni = sni,
             fingerprint = fp,
             flow = flow,
-            vlessEncryption = "none",
+            vlessEncryption = vlessEncryption,
             vlessTls = security == "tls" || security == "reality",
             realityEnabled = security == "reality",
             realityPublicKey = pbk,

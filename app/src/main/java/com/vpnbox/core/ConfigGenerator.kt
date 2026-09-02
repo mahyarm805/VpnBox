@@ -206,6 +206,9 @@ class ConfigGenerator @Inject constructor() {
             addProperty("server", server.address)
             addProperty("server_port", server.port)
             addProperty("uuid", server.uuid ?: "")
+            if (server.vlessEncryption != "none") {
+                addProperty("encryption", server.vlessEncryption)
+            }
             if (!server.flow.isNullOrEmpty()) {
                 addProperty("flow", server.flow)
             }

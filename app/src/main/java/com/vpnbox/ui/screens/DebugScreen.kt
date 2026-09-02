@@ -31,6 +31,7 @@ import androidx.lifecycle.viewModelScope
 import com.vpnbox.core.ConfigGenerator
 import com.vpnbox.core.SingBoxManager
 import com.vpnbox.core.VpnTunnelService
+import com.vpnbox.data.repository.ServerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,8 +57,13 @@ enum class StageStatus { PASS, FAIL, WAITING }
 
 @HiltViewModel
 class DebugViewModel @Inject constructor(
-    private val configGenerator: ConfigGenerator
+    private val configGenerator: ConfigGenerator,
+    private val serverRepository: ServerRepository
 ) : ViewModel() {
+
+    // ── VLESS encryption ────────────────────────────────────────────────
+    private val _vlessEncryption = MutableStateFlow("none")
+    val vlessEncryption: StateFlow<String> = _vlessEncryption.asStateFlow()
 
     // ── Device info ──────────────────────────────────────────────────────
     private val _androidVersion = MutableStateFlow("${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -114,6 +120,10 @@ class DebugViewModel @Inject constructor(
     fun refresh(context: Context) {
         viewModelScope.launch {
             _installInfo.value = SingBoxManager.getInstallInfo(context)
+        }
+        viewModelScope.launch {
+            val server = serverRepository.getSelectedServer()
+            _vlessEncryption.value = server?.vlessEncryption ?: "none"
         }
 
         _configText.value = configGenerator.getLastConfig()
@@ -244,9 +254,20 @@ class DebugViewModel @Inject constructor(
             PipelineStage("CONFIG VALIDATION", StageStatus.WAITING, "No config generated yet")
         }
 
-        // Stage 7: TUN START
+        // Stage 7: VLESS ENCRYPTION WARNING
+        val lastConfig = VpnTunnelService.getLastConfig() ?: ""
+        val hasMlkem = lastConfig.contains("mlkem768x25519plus")
+        val stage7 = if (hasMlkem) {
+            PipelineStage(
+                name = "CONFIG WARNING",
+                status = StageStatus.FAIL,
+                details = "VLESS Encryption (mlkem768x25519plus) NOT supported by sing-box v1.11.4. Regular VLESS works. Use Xray-core for post-quantum."
+            )
+        } else null
+
+        // Stage 8: TUN START
         val tunUp = running && logLines.any { it.contains("tun", ignoreCase = true) && !it.contains("[ERR]") }
-        val stage7 = if (tunUp) {
+        val stage8 = if (tunUp) {
             PipelineStage("TUN START", StageStatus.PASS, "TUN interface is active")
         } else if (running) {
             PipelineStage("TUN START", StageStatus.WAITING, "sing-box running, TUN status pending")
@@ -261,11 +282,11 @@ class DebugViewModel @Inject constructor(
             }
         }
 
-        // Stage 8: PROXY CONNECTION
+        // Stage 9: PROXY CONNECTION
         val proxyUp = running && logLines.any {
             it.contains("[OUT]", ignoreCase = true) && !it.contains("[ERR]")
         }
-        val stage8 = if (proxyUp) {
+        val stage9 = if (proxyUp) {
             PipelineStage("PROXY CONNECTION", StageStatus.PASS, "Traffic is flowing")
         } else if (running) {
             PipelineStage("PROXY CONNECTION", StageStatus.WAITING, "sing-box running, waiting for traffic")
@@ -280,7 +301,7 @@ class DebugViewModel @Inject constructor(
             }
         }
 
-        _stages.value = listOf(stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8)
+        _stages.value = listOfNotNull(stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8, stage9)
     }
 
     private fun formatSize(bytes: Long): String {
@@ -313,6 +334,7 @@ fun DebugScreen(
     val configText by viewModel.configText.collectAsState()
     val coreLogsText by viewModel.coreLogsText.collectAsState()
     val isCoreRunning by viewModel.isCoreRunning.collectAsState()
+    val vlessEncryption by viewModel.vlessEncryption.collectAsState()
 
     val stages by viewModel.stages.collectAsState()
     val androidVersion by viewModel.androidVersion.collectAsState()
@@ -377,6 +399,10 @@ fun DebugScreen(
                     InfoRow(
                         label = "Binary path",
                         value = installInfo.path.ifEmpty { "—" }
+                    )
+                    InfoRow(
+                        label = "VLESS Encryption",
+                        value = vlessEncryption.ifEmpty { "none" }
                     )
                 }
             }
